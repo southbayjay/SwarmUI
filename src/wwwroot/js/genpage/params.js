@@ -1198,10 +1198,33 @@ class PromptTabCompleteClass {
             }
             return ['\nSpecify before the ">" some text to match against in the image, like "<segment:face>".', '\nCan also do "<segment:text,creativity,threshold>" eg "face,0.6,0.5" where creativity is InitImageCreativity, and threshold is mask matching threshold for CLIP-Seg.', '\nYou can use a negative threshold value like "<segment:face,0.6,-0.5>" to invert the mask.', '\nYou may use the "yolo-" prefix to use a YOLOv8 seg model,', '\nor format "yolo-<model>-1" to get specifically the first result from a YOLOv8 match list.'];
         });
+        this.registerPrefix('setvar[var_name]', 'Store text for reference later in the prompt', (prefix) => { 
+            return ['\nSave the content of the tag into the named variable. eg "<setvar[colors]: red and blue>", then use like "<var:colors>"', '\nVariables can include the results of other tags. eg "<setvar[expression]: <random: smiling|frowning|crying>>"', '\nReference stored values later in the prompt with the <var:> tag'];
+        });
+        this.registerPrefix('var', 'Reference a previously saved variable later', (prefix, prompt) => {
+            let prefixLow = prefix.toLowerCase();
+            let possible = [];
+            let matches = prompt.match(/<setvar\[(.*?)\]:/g);
+            if (matches) {
+                for (let match of matches) {
+                    let varName = match.substring('<setvar['.length, match.length - ']:'.length);
+                    if (varName.toLowerCase().includes(prefixLow)) {
+                        possible.push(varName);
+                    }
+                }
+            }
+            if (possible.length == 0) {
+                return ['\nRecall a value previously saved with <setvar[name]:...>, use like "<var:name>"','\n"setvar" must be used earlier in the prompt, then "var" later'];
+            }
+            return possible;
+        });
         this.registerPrefix('clear', 'Automatically clear part of the image to transparent (by CLIP segmentation matching) (iffy quality, prefer the Remove Background parameter over this)', (prefix) => {
             return ['\nSpecify before the ">" some text to match against in the image, like "<segment:background>"'];
         });
         this.registerPrefix('break', 'Split this prompt across multiple lines of conditioning to the model (helps separate concepts for long prompts).', (prefix) => {
+            return [];
+        }, true);
+        this.registerPrefix('trigger', "Automatically fills with the current model or LoRA's trigger phrase(s), if any.", (prefix) => {
             return [];
         }, true);
         this.lastWord = null;
@@ -1296,7 +1319,7 @@ class PromptTabCompleteClass {
         if (!(prefix in this.prefixes)) {
             return [];
         }
-        return this.prefixes[prefix].completer(suffix).map(p => p.startsWith('\n') ? p : `<${prefix}:${p}>`);
+        return this.prefixes[prefix].completer(suffix, prompt).map(p => p.startsWith('\n') ? p : `<${prefix}:${p}>`);
     }
 
     onKeyDown(e) {
@@ -1310,7 +1333,10 @@ class PromptTabCompleteClass {
                 this.popover.remove();
                 this.popover = null;
                 this.blockInput = true;
-                setTimeout(() => this.blockInput = false, 10);
+                setTimeout(() => {
+                    this.blockInput = false;
+                    this.onInput(e.target);
+                }, 10);
             }
         }
     }
