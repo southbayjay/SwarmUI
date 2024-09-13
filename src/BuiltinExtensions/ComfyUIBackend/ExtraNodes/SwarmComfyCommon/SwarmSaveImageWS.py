@@ -7,12 +7,26 @@ import time, io, struct
 SPECIAL_ID = 12345 # Tells swarm that the node is going to output final images
 VIDEO_ID = 12346
 
+def send_image_to_server_raw(type_num: int, save_me: callable, id: int):
+    out = io.BytesIO()
+    header = struct.pack(">I", type_num)
+    out.write(header)
+    save_me(out)
+    out.seek(0)
+    preview_bytes = out.getvalue()
+    server = PromptServer.instance
+    server.send_sync("progress", {"value": id, "max": id}, sid=server.client_id)
+    server.send_sync(BinaryEventTypes.PREVIEW_IMAGE, preview_bytes, sid=server.client_id)
+
 class SwarmSaveImageWS:
     @classmethod
     def INPUT_TYPES(s):
         return {
             "required": {
-                "images": ("IMAGE", )
+                "images": ("IMAGE", ),
+            },
+            "optional": {
+                "bit_depth": (["8bit", "16bit"], {"default": "8bit"})
             }
         }
 
@@ -22,19 +36,38 @@ class SwarmSaveImageWS:
     OUTPUT_NODE = True
     DESCRIPTION = "Acts like a special version of 'SaveImage' that doesn't actual save to disk, instead it sends directly over websocket. This is intended so that SwarmUI can save the image itself rather than having Comfy's Core save it."
 
-    def save_images(self, images):
+    def save_images(self, images, bit_depth = "8bit"):
         pbar = comfy.utils.ProgressBar(SPECIAL_ID)
         step = 0
         for image in images:
-            i = 255.0 * image.cpu().numpy()
-            img = Image.fromarray(np.clip(i, 0, 255).astype(np.uint8))
-            pbar.update_absolute(step, SPECIAL_ID, ("PNG", img, None))
+            if bit_depth == "16bit":
+                i = 65535.0 * image.cpu().numpy()
+                img = self.convert_img_16bit(np.clip(i, 0, 65535).astype(np.uint16))
+                send_image_to_server_raw(2, lambda out: out.write(img), SPECIAL_ID)
+            else:
+                i = 255.0 * image.cpu().numpy()
+                img = Image.fromarray(np.clip(i, 0, 255).astype(np.uint8))
+                pbar.update_absolute(step, SPECIAL_ID, ("PNG", img, None))
             step += 1
 
         return {}
 
+    def convert_img_16bit(self, img_np):
+        try:
+            import cv2
+            img_np = cv2.cvtColor(img_np, cv2.COLOR_BGR2RGB)
+            success, img_encoded = cv2.imencode('.png', img_np)
+
+            if img_encoded is None or not success:
+                raise RuntimeError("OpenCV failed to encode image.")
+
+            return img_encoded.tobytes()
+        except Exception as e:
+            print(f"Error converting OpenCV image to PIL: {e}")
+            raise
+
     @classmethod
-    def IS_CHANGED(s, images):
+    def IS_CHANGED(s, images, bit_depth = "8bit"):
         return time.time()
 
 
@@ -67,16 +100,9 @@ class SwarmSaveAnimatedWebpWS:
             img = Image.fromarray(np.clip(i, 0, 255).astype(np.uint8))
             pil_images.append(img)
 
-        out = io.BytesIO()
-        type_num = 3
-        header = struct.pack(">I", type_num)
-        out.write(header)
-        pil_images[0].save(out, save_all=True, duration=int(1000.0/fps), append_images=pil_images[1 : len(pil_images)], lossless=lossless, quality=quality, method=method, format='WEBP')
-        out.seek(0)
-        preview_bytes = out.getvalue()
-        server = PromptServer.instance
-        server.send_sync("progress", {"value": 12346, "max": 12346}, sid=server.client_id)
-        server.send_sync(BinaryEventTypes.PREVIEW_IMAGE, preview_bytes, sid=server.client_id)
+        def do_save(out):
+            pil_images[0].save(out, save_all=True, duration=int(1000.0/fps), append_images=pil_images[1 : len(pil_images)], lossless=lossless, quality=quality, method=method, format='WEBP')
+        send_image_to_server_raw(3, do_save, 12346)
 
         return { }
 

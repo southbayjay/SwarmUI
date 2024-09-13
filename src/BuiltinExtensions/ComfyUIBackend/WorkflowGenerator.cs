@@ -430,7 +430,8 @@ public class WorkflowGenerator
         {
             return CreateNode("SwarmSaveImageWS", new JObject()
             {
-                ["images"] = image
+                ["images"] = image,
+                ["bit_depth"] = UserInput.Get(T2IParamTypes.BitDepth, "8bit")
             }, id);
         }
         else
