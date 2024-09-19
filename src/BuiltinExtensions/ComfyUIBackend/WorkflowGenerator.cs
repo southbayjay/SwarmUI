@@ -447,6 +447,15 @@ public class WorkflowGenerator
     /// <summary>Creates a model loader and adapts it with any registered model adapters, and returns (Model, Clip, VAE).</summary>
     public (T2IModel, JArray, JArray, JArray) CreateStandardModelLoader(T2IModel model, string type, string id = null, bool noCascadeFix = false)
     {
+        string helper = $"modelloader_{model.Name}_{type}";
+        if (NodeHelpers.TryGetValue(helper, out string alreadyLoaded))
+        {
+            string[] parts = alreadyLoaded.SplitFast(':');
+            LoadingModel = [parts[0], int.Parse(parts[1])];
+            LoadingClip = parts[2].Length == 0 ? null : [parts[2], int.Parse(parts[3])];
+            LoadingVAE = parts[4].Length == 0 ? null : [parts[4], int.Parse(parts[5])];
+            return (model, LoadingModel, LoadingClip, LoadingVAE);
+        }
         void requireClipModel(string name, string url)
         {
             if (ClipModelsValid.Contains(name))
@@ -742,6 +751,7 @@ public class WorkflowGenerator
         {
             throw new SwarmUserErrorException($"Model loader for {model.Name} didn't work - are you sure it has an architecture ID set properly?");
         }
+        NodeHelpers[helper] = $"{LoadingModel[0]}:{LoadingModel[1]}" + (LoadingClip is null ? "::" : $":{LoadingClip[0]}:{LoadingClip[1]}") + (LoadingVAE is null ? "::" : $":{LoadingVAE[0]}:{LoadingVAE[1]}");
         return (model, LoadingModel, LoadingClip, LoadingVAE);
     }
 
@@ -774,7 +784,7 @@ public class WorkflowGenerator
     public string DefaultPreviews = "default";
 
     /// <summary>Creates a KSampler and returns its node ID.</summary>
-    public string CreateKSampler(JArray model, JArray pos, JArray neg, JArray latent, double cfg, int steps, int startStep, int endStep, long seed, bool returnWithLeftoverNoise, bool addNoise, double sigmin = -1, double sigmax = -1, string previews = null, string defsampler = null, string defscheduler = null, string id = null, bool rawSampler = false, bool doTiled = false)
+    public string CreateKSampler(JArray model, JArray pos, JArray neg, JArray latent, double cfg, int steps, int startStep, int endStep, long seed, bool returnWithLeftoverNoise, bool addNoise, double sigmin = -1, double sigmax = -1, string previews = null, string defsampler = null, string defscheduler = null, string id = null, bool rawSampler = false, bool doTiled = false, bool isFirstSampler = false)
     {
         bool willCascadeFix = false;
         JArray cascadeModel = null;
@@ -784,6 +794,11 @@ public class WorkflowGenerator
             willCascadeFix = true;
             defsampler ??= "euler_ancestral";
             defscheduler ??= "simple";
+            if (!isFirstSampler)
+            {
+                willCascadeFix = false;
+                model = cascadeModel;
+            }
         }
         if (IsFlux())
         {

@@ -6,8 +6,7 @@ using SwarmUI.DataHolders;
 using SwarmUI.Utils;
 using SwarmUI.Text2Image;
 using FreneticUtilities.FreneticExtensions;
-using System.Xml.Linq;
-using Newtonsoft.Json.Linq;
+using System.Security.Cryptography;
 
 namespace SwarmUI.Accounts;
 
@@ -44,7 +43,24 @@ public class User
         {
             Restrictions.TrySetFieldModified(field, false);
         }
-        Settings.Load(new FDSSection(data.RawSettings));
+        FDSSection settingsRaw = new(data.RawSettings);
+        // TODO: Legacy format patch from beta 0.9.2!
+        bool? autoCompleteEscapeParens = settingsRaw.GetBool("AutoCompleteEscapeParens", null);
+        if (autoCompleteEscapeParens.HasValue)
+        {
+            settingsRaw.Set("AutoComplete.EscapeParens", autoCompleteEscapeParens.Value);
+        }
+        string autoCompleteSource = settingsRaw.GetString("AutoCompletionsSource", null);
+        if (autoCompleteSource is not null)
+        {
+            settingsRaw.Set("AutoComplete.Source", autoCompleteSource);
+        }
+        string autoCompleteSuffix = settingsRaw.GetString("AutoCompleteSuffix", null);
+        if (autoCompleteSuffix is not null)
+        {
+            settingsRaw.Set("AutoComplete.Suffix", autoCompleteSuffix);
+        }
+        Settings.Load(settingsRaw);
     }
 
     /// <summary>Save this user's data to the internal user database.</summary>
@@ -232,76 +248,117 @@ public class User
     /// <summary>Simplified keynames for things commonly used in ExtraMeta, to allow for OutputPath builder to treat these cases as empty and not errors.</summary>
     public static HashSet<string> KnownExtraMetaVals = ["debugbackend", "scoring", "usedembeddings", "generationtime", "intermediate", "usedwildcards", "swarmversion", "date", "originalprompt", "originalnegativeprompt", "presetsused"];
 
-    /// <summary>Converts the user's output path setting to a real path for the given parameters. Note that the path is partially cleaned, but not completely.</summary>
-    public string BuildImageOutputPath(T2IParamInput user_input, int batchIndex)
+    /// <summary>Helper for filling output path data.</summary>
+    public class OutpathFillHelper
     {
-        int maxLen = Settings.OutPathBuilder.MaxLenPerPart;
-        DateTimeOffset time = DateTimeOffset.Now;
-        string simplifyModel(string model)
+        public DateTimeOffset Time = DateTimeOffset.Now;
+
+        public T2IParamInput UserInput;
+
+        public Dictionary<string, object> ExtraMetaSimplified;
+
+        public User LinkedUser;
+
+        public bool SkipFolders;
+
+        public string BatchID;
+
+        public OutpathFillHelper(T2IParamInput user_input, User user, string batchId)
+        {
+            UserInput = user_input;
+            ExtraMetaSimplified = user_input.ExtraMeta.ToDictionary(p => T2IParamTypes.CleanTypeName(p.Key), p => p.Value);
+            LinkedUser = user;
+            BatchID = batchId;
+            SkipFolders = LinkedUser?.Settings?.OutPathBuilder?.ModelPathsSkipFolders ?? false;
+        }
+
+        /// <summary>Simplify a model filename appropriately in accordance with settings. Strips file extensions.</summary>
+        public string SimplifyModel(string model)
         {
             model = model.Replace('\\', '/').Trim();
-            if (model.EndsWith(".safetensors") || model.EndsWith(".sft") || model.EndsWith(".ckpt"))
+            if (model.EndsWith(".ckpt") || T2IModel.NativelySupportedModelExtensions.Contains(model.AfterLast('.')))
             {
                 model = model.BeforeLast('.');
             }
-            if (Settings.OutPathBuilder.ModelPathsSkipFolders)
+            if (SkipFolders)
             {
                 model = model.AfterLast('/');
             }
             return model;
         }
-        Dictionary<string, object> extraMetaSimplified = user_input.ExtraMeta.ToDictionary(p => T2IParamTypes.CleanTypeName(p.Key), p => p.Value);
-        string buildPathPart(string part)
+
+        /// <summary>Quick 8 character hash of some text.</summary>
+        public string QuickHash(string val)
+        {
+            return Utilities.BytesToHex(SHA256.HashData(val.EncodeUTF8())[0..4]);
+        }
+
+        public string FillPartUnformatted(string part)
         {
             string data = part switch
             {
-                "year" => $"{time.Year:0000}",
-                "month" => $"{time.Month:00}",
-                "month_name" => $"{time:MMMM}",
-                "day" => $"{time.Day:00}",
-                "day_name" => $"{time:dddd}",
-                "hour" => $"{time.Hour:00}",
-                "minute" => $"{time.Minute:00}",
-                "second" => $"{time.Second:00}",
-                "prompt" => user_input.Get(T2IParamTypes.Prompt),
-                "negative_prompt" => user_input.Get(T2IParamTypes.NegativePrompt),
-                "seed" => $"{user_input.Get(T2IParamTypes.Seed)}",
-                "cfg_scale" => $"{user_input.Get(T2IParamTypes.CFGScale)}",
-                "width" => $"{user_input.GetImageWidth()}",
-                "height" => $"{user_input.GetImageHeight()}",
-                "steps" => $"{user_input.Get(T2IParamTypes.Steps)}",
-                "model" => simplifyModel(user_input.Get(T2IParamTypes.Model)?.Name ?? "unknown"),
-                "model_title" => user_input.Get(T2IParamTypes.Model)?.Metadata?.Title ?? "unknown",
-                "loras" => user_input.TryGet(T2IParamTypes.Loras, out List<string> loras) ? loras.Select(simplifyModel).JoinString("-") : "",
-                "batch_id" => $"{batchIndex}",
-                "user_name" => UserID,
+                "year" => $"{Time.Year:0000}",
+                "month" => $"{Time.Month:00}",
+                "month_name" => $"{Time:MMMM}",
+                "day" => $"{Time.Day:00}",
+                "day_name" => $"{Time:dddd}",
+                "hour" => $"{Time.Hour:00}",
+                "minute" => $"{Time.Minute:00}",
+                "second" => $"{Time.Second:00}",
+                "prompt" => UserInput.Get(T2IParamTypes.Prompt),
+                "prompthash" => QuickHash(UserInput.Get(T2IParamTypes.Prompt)),
+                "negative_prompt" => UserInput.Get(T2IParamTypes.NegativePrompt),
+                "negativeprompthash" => QuickHash(UserInput.Get(T2IParamTypes.NegativePrompt)),
+                "seed" => $"{UserInput.Get(T2IParamTypes.Seed)}",
+                "cfg_scale" => $"{UserInput.Get(T2IParamTypes.CFGScale)}",
+                "width" => $"{UserInput.GetImageWidth()}",
+                "height" => $"{UserInput.GetImageHeight()}",
+                "steps" => $"{UserInput.Get(T2IParamTypes.Steps)}",
+                "model" => SimplifyModel(UserInput.Get(T2IParamTypes.Model)?.Name ?? "unknown"),
+                "model_title" => UserInput.Get(T2IParamTypes.Model)?.Metadata?.Title ?? "unknown",
+                "loras" => UserInput.TryGet(T2IParamTypes.Loras, out List<string> loras) ? loras.Select(SimplifyModel).JoinString("-") : "",
+                "batch_id" => BatchID,
+                "user_name" => LinkedUser?.UserID ?? "None",
                 "number" => "[number]",
                 _ => null
             };
             if (data is null)
             {
-                data = $"[{part}]";
-                if (T2IParamTypes.TryGetType(part, out T2IParamType type, user_input))
+                string clean = T2IParamTypes.CleanTypeName(part);
+                if (T2IParamTypes.TryGetType(clean, out T2IParamType type, UserInput))
                 {
                     data = "";
-                    if (user_input.TryGetRaw(type, out object val))
+                    if (UserInput.TryGetRaw(type, out object val))
                     {
                         data = $"{T2IParamInput.SimplifyParamVal(val)}";
                         if (val is T2IModel model)
                         {
-                            data = simplifyModel(data);
+                            data = SimplifyModel(data);
                         }
                     }
                 }
-                else if (extraMetaSimplified.TryGetValue(T2IParamTypes.CleanTypeName(part), out object extraVal))
+                else if (ExtraMetaSimplified.TryGetValue(clean, out object extraVal))
                 {
                     data = $"{T2IParamInput.SimplifyParamVal(extraVal)}";
                 }
-                else if (KnownExtraMetaVals.Contains(part))
+                else if (KnownExtraMetaVals.Contains(clean))
                 {
                     data = "";
                 }
             }
+            return data;
+        }
+    }
+
+    /// <summary>Converts the user's output path setting to a real path for the given parameters. Note that the path is partially cleaned, but not completely.</summary>
+    public string BuildImageOutputPath(T2IParamInput user_input, int batchIndex)
+    {
+        int maxLen = Settings.OutPathBuilder.MaxLenPerPart;
+        DateTimeOffset time = DateTimeOffset.Now;
+        OutpathFillHelper helper = new(user_input, this, $"{batchIndex}");
+        string buildPathPart(string part)
+        {
+            string data = helper.FillPartUnformatted(part) ?? $"[{part}]";
             if (data.Length > maxLen)
             {
                 data = data[..maxLen];

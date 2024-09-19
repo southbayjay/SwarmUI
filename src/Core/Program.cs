@@ -111,13 +111,13 @@ public class Program
                 return;
             }
             Logs.Init("Loading settings file...");
-            DataDir = Utilities.CombinePathWithAbsolute(Environment.CurrentDirectory, CommandLineFlags.GetValueOrDefault("data_dir", "Data"));
+            DataDir = Utilities.CombinePathWithAbsolute(Environment.CurrentDirectory, GetCommandLineFlag("data_dir", "Data"));
             SettingsFilePath = CommandLineFlags.GetValueOrDefault("settings_file", "Data/Settings.fds");
             LoadSettingsFile();
             // TODO: Legacy format patch from Alpha 0.5! Remove this before 1.0.
             if (ServerSettings.DefaultUser.FileFormat.ImageFormat == "jpg")
             {
-                  ServerSettings.DefaultUser.FileFormat.ImageFormat = "JPG";
+                ServerSettings.DefaultUser.FileFormat.ImageFormat = "JPG";
             }
             if (!LockSettings)
             {
@@ -500,6 +500,22 @@ public class Program
         if (imagePerFolder.HasValue)
         {
             section.Set("Metadata.ImageMetadataPerFolder", imagePerFolder.Value);
+        }
+        // TODO: Legacy format patch from beta 0.9.2!
+        bool? autoCompleteEscapeParens = section.GetBool("DefaultUser.AutoCompleteEscapeParens", null);
+        if (autoCompleteEscapeParens.HasValue)
+        {
+            section.Set("DefaultUser.AutoComplete.EscapeParens", autoCompleteEscapeParens.Value);
+        }
+        string autoCompleteSource = section.GetString("DefaultUser.AutoCompletionsSource", null);
+        if (autoCompleteSource is not null)
+        {
+            section.Set("DefaultUser.AutoComplete.Source", autoCompleteSource);
+        }
+        string autoCompleteSuffix = section.GetString("DefaultUser.AutoCompleteSuffix", null);
+        if (autoCompleteSuffix is not null)
+        {
+            section.Set("DefaultUser.AutoComplete.Suffix", autoCompleteSuffix);
         }
         ServerSettings.Load(section);
     }

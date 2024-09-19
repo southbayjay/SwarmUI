@@ -154,7 +154,7 @@ public class T2IModelClassSorter
             return isSVD(h);
         }});
         // ====================== Stable Cascade ======================
-        Register(new() { ID = "stable-cascade-v1-stage-a", CompatClass = "stable-cascade-v1", Name = "Stable Cascade v1 (Stage A)", StandardWidth = 1024, StandardHeight = 1024, IsThisModelOfClass = (m, h) =>
+        Register(new() { ID = "stable-cascade-v1-stage-a/vae", CompatClass = "stable-cascade-v1", Name = "Stable Cascade v1 (Stage A)", StandardWidth = 1024, StandardHeight = 1024, IsThisModelOfClass = (m, h) =>
         {
              return isCascadeA(h) && !isCascadeB(h) && !isCascadeC(h);
         }});
@@ -180,7 +180,7 @@ public class T2IModelClassSorter
             return isSD3Cnet(h);
         }});
         // ====================== BFL Flux.1 ======================
-        Register(new() { ID = "Flux.1-AE", CompatClass = "flux-1", Name = "Flux.1 Autoencoder", StandardWidth = 1024, StandardHeight = 1024, IsThisModelOfClass = (m, h) => { return false; } });
+        Register(new() { ID = "flux.1/vae", CompatClass = "flux-1", Name = "Flux.1 Autoencoder", StandardWidth = 1024, StandardHeight = 1024, IsThisModelOfClass = (m, h) => { return false; } });
         Register(new() { ID = "Flux.1-schnell", CompatClass = "flux-1", Name = "Flux.1 Schnell", StandardWidth = 1024, StandardHeight = 1024, IsThisModelOfClass = (m, h) =>
         {
             return (h.ContainsKey("double_blocks.0.img_attn.norm.key_norm.scale") && !h.ContainsKey("guidance_in.in_layer.bias")) // 'unet'
@@ -209,6 +209,8 @@ public class T2IModelClassSorter
         Remaps["flux-1-schnell/controlnet"] = "Flux.1-dev/controlnet";
         Remaps["Flux.1-schnell/lora"] = "Flux.1-dev/lora";
         Remaps["Flux.1-schnell/controlnet"] = "Flux.1-dev/controlnet";
+        Remaps["Flux.1-AE"] = "flux.1/vae";
+        Remaps["stable-cascade-v1-stage-a"] = "stable-cascade-v1-stage-a/vae";
         // ====================== Random Other Models ======================
         Register(new() { ID = "alt_diffusion_v1_512_placeholder", CompatClass = "alt_diffusion_v1", Name = "Alt-Diffusion", StandardWidth = 512, StandardHeight = 512, IsThisModelOfClass = (m, h) =>
         {

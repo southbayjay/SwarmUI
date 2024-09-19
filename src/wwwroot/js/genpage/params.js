@@ -1290,9 +1290,33 @@ class PromptTabCompleteClass {
                         rawMatchSet.push(entry);
                     }
                 }
-                startWithList.sort((a, b) => a.low.length - b.low.length || a.low.localeCompare(b.low));
-                containList.sort((a, b) => a.low.length - b.low.length || a.low.localeCompare(b.low));
-                baseList = startWithList.concat(containList);
+                let sortMode = getUserSetting('autocomplete.sortmode');
+                let doSortList = (list) => {
+                    if (sortMode == 'Active') {
+                        list.sort((a, b) => a.low.length - b.low.length || a.low.localeCompare(b.low));
+                    }
+                    else if (sortMode == 'Alphabetical') {
+                        list.sort((a, b) => a.low.localeCompare(b.low));
+                    }
+                    else if (sortMode == 'Frequency') {
+                        list.sort((a, b) => b.count - a.count);
+                    }
+                    // else 'None'
+                }
+                let matchMode = getUserSetting('autocomplete.matchmode');
+                if (matchMode == 'Bucketed') {
+                    doSortList(startWithList);
+                    doSortList(containList);
+                    baseList = startWithList.concat(containList);
+                }
+                else if (matchMode == 'Contains') {
+                    doSortList(rawMatchSet);
+                    baseList = rawMatchSet;
+                }
+                else if (matchMode == 'StartsWith') {
+                    doSortList(startWithList);
+                    baseList = startWithList;
+                }
                 if (baseList.length > 50) {
                     baseList = baseList.slice(0, 50);
                 }

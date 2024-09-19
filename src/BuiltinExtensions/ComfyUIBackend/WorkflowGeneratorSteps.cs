@@ -866,7 +866,7 @@ public class WorkflowGeneratorSteps
             else
             {
                 g.CreateKSampler(g.FinalModel, g.FinalPrompt, g.FinalNegativePrompt, g.FinalLatentImage, cfg, steps, startStep, endStep,
-                    g.UserInput.Get(T2IParamTypes.Seed), g.UserInput.Get(T2IParamTypes.RefinerMethod, "none") == "StepSwapNoisy", g.MainSamplerAddNoise, id: "10");
+                    g.UserInput.Get(T2IParamTypes.Seed), g.UserInput.Get(T2IParamTypes.RefinerMethod, "none") == "StepSwapNoisy", g.MainSamplerAddNoise, id: "10", isFirstSampler: true);
                 if (g.UserInput.Get(T2IParamTypes.UseReferenceOnly, false))
                 {
                     string fromBatch = g.CreateNode("LatentFromBatch", new JObject()
@@ -1128,6 +1128,10 @@ public class WorkflowGeneratorSteps
             PromptRegion.Part[] parts = new PromptRegion(g.UserInput.Get(T2IParamTypes.Prompt, "")).Parts.Where(p => p.Type == PromptRegion.PartType.ClearSegment).ToArray();
             foreach (PromptRegion.Part part in parts)
             {
+                if (g.UserInput.Get(T2IParamTypes.SaveIntermediateImages, false))
+                {
+                    g.CreateImageSaveNode(g.FinalImageOut, g.GetStableDynamicID(50000, 0));
+                }
                 string segmentNode = g.CreateNode("SwarmClipSeg", new JObject()
                 {
                     ["images"] = g.FinalImageOut,
@@ -1162,6 +1166,10 @@ public class WorkflowGeneratorSteps
             }
             if (g.UserInput.Get(T2IParamTypes.RemoveBackground, false))
             {
+                if (g.UserInput.Get(T2IParamTypes.SaveIntermediateImages, false))
+                {
+                    g.CreateImageSaveNode(g.FinalImageOut, g.GetStableDynamicID(50000, 0));
+                }
                 string removed = g.CreateNode("SwarmRemBg", new JObject()
                 {
                     ["images"] = g.FinalImageOut

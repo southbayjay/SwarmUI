@@ -240,6 +240,7 @@ public static class T2IAPI
             {
                 imageSet.Add(image);
             }
+            WebhookManager.SendEveryGenWebhook(thisParams, url);
             output(new JObject() { ["image"] = url, ["batch_index"] = $"{actualIndex}", ["metadata"] = string.IsNullOrWhiteSpace(metadata) ? null : metadata });
         }
         for (int i = 0; i < images && !claim.ShouldCancel; i++)
@@ -333,6 +334,7 @@ public static class T2IAPI
         }
         T2IEngine.PostBatchEvent?.Invoke(new(user_input, [.. griddables]));
         output(new JObject() { ["discard_indices"] = JToken.FromObject(discard) });
+        WebhookManager.SendManualAtEndWebhook(user_input);
     }
 
     public static (int, int)[] GridShapeTable =

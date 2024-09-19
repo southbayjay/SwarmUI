@@ -150,7 +150,18 @@ function editModel(model, browser) {
     }
     getRequiredElementById('edit_model_technical_data').innerText = technical;
     getRequiredElementById('edit_model_name').value = model.title || model.name;
-    getRequiredElementById('edit_model_type').value = model.architecture || '';
+    let modelTypeSelector = getRequiredElementById('edit_model_type');
+    modelTypeSelector.value = model.architecture || '';
+    for (let opt of modelTypeSelector.options) {
+        let slash = opt.value.indexOf('/');
+        let postSlash = slash > 0 ? opt.value.substring(slash + 1) : '';
+        if (opt.value == model.architecture || browser.subIds.includes(postSlash)) {
+            opt.style.display = 'block';
+        }
+        else {
+            opt.style.display = 'none';
+        }
+    }
     getRequiredElementById('edit_model_prediction_type').value = model.prediction_type || '';
     getRequiredElementById('edit_model_resolution').value = `${model.standard_width}x${model.standard_height}`;
     for (let val of ['description', 'author', 'usage_hint', 'date', 'license', 'trigger_phrase', 'tags']) {
@@ -302,8 +313,9 @@ function sortModelLocal(a, b, files) {
 }
 
 class ModelBrowserWrapper {
-    constructor(subType, container, id, selectOne, extraHeader = '') {
+    constructor(subType, subIds, container, id, selectOne, extraHeader = '') {
         this.subType = subType;
+        this.subIds = subIds;
         this.selectOne = selectOne;
         let format = subType == 'Wildcards' ? 'Small Cards' : 'Cards';
         extraHeader += `<label for="models_${subType}_sort_by">Sort:</label> <select id="models_${subType}_sort_by"><option>Name</option><option>Title</option><option>DateCreated</option><option>DateModified</option></select> <input type="checkbox" id="models_${subType}_sort_reverse"> <label for="models_${subType}_sort_reverse">Reverse</label>`;
@@ -337,7 +349,7 @@ class ModelBrowserWrapper {
             }
         }
         let prefix = path == '' ? '' : (path.endsWith('/') ? path : `${path}/`);
-        genericRequest('ListModels', {'path': path, 'depth': depth, 'subtype': this.subType, 'sortBy': sortBy, 'sortReverse': reverse}, data => {
+        genericRequest('ListModels', {'path': path, 'depth': Math.round(depth), 'subtype': this.subType, 'sortBy': sortBy, 'sortReverse': reverse}, data => {
             let files = data.files.sort((a,b) => sortModelLocal(a, b, data.files)).map(f => { return { 'name': f.name, 'data': f }; });
             for (let file of files) {
                 file.data.display = cleanModelName(file.data.name.substring(prefix.length));
@@ -381,6 +393,9 @@ class ModelBrowserWrapper {
             if (fix) {
                 fix();
             }
+        }, 0, e => {
+            showError(`Failed to list models: ${e}`);
+            callback([], []);
         });
     }
 
@@ -391,12 +406,7 @@ class ModelBrowserWrapper {
         if (this.subType == 'Stable-Diffusion' && model.data.local) {
             let buttonLoad = () => {
                 directSetModel(model.data);
-                if (curModelSpecialFormat == 'bnb_nf4' && !currentBackendFeatureSet.includes('bnb_nf4') && !localStorage.getItem('hide_bnb_nf4_check')) {
-                    $('#bnb_nf4_installer').modal('show');
-                    return;
-                }
-                if (curModelSpecialFormat == 'gguf' && !currentBackendFeatureSet.includes('gguf') && !localStorage.getItem('hide_gguf_check')) {
-                    $('#gguf_installer').modal('show');
+                if (doModelInstallRequiredCheck()) {
                     return;
                 }
                 makeWSRequestT2I('SelectModelWS', {'model': model.data.name}, data => {
@@ -520,12 +530,12 @@ class ModelBrowserWrapper {
     }
 }
 
-let sdModelBrowser = new ModelBrowserWrapper('Stable-Diffusion', 'model_list', 'modelbrowser', (model) => { directSetModel(model.data); });
-let sdVAEBrowser = new ModelBrowserWrapper('VAE', 'vae_list', 'sdvaebrowser', (vae) => { directSetVae(vae.data); });
-let sdLoraBrowser = new ModelBrowserWrapper('LoRA', 'lora_list', 'sdlorabrowser', (lora) => { toggleSelectLora(cleanModelName(lora.data.name)); });
-let sdEmbedBrowser = new ModelBrowserWrapper('Embedding', 'embedding_list', 'sdembedbrowser', (embed) => { selectEmbedding(embed.data); });
-let sdControlnetBrowser = new ModelBrowserWrapper('ControlNet', 'controlnet_list', 'sdcontrolnetbrowser', (controlnet) => { setControlNet(controlnet.data); });
-let wildcardsBrowser = new ModelBrowserWrapper('Wildcards', 'wildcard_list', 'wildcardsbrowser', (wildcard) => { selectWildcard(wildcard.data); }, `<button id="wildcards_list_create_new_button" class="refresh-button" onclick="create_new_wildcard_button()">Create New Wildcard</button>`);
+let sdModelBrowser = new ModelBrowserWrapper('Stable-Diffusion', ['', 'inpaint', 'tensorrt'], 'model_list', 'modelbrowser', (model) => { directSetModel(model.data); });
+let sdVAEBrowser = new ModelBrowserWrapper('VAE', ['vae'], 'vae_list', 'sdvaebrowser', (vae) => { directSetVae(vae.data); });
+let sdLoraBrowser = new ModelBrowserWrapper('LoRA', ['lora'], 'lora_list', 'sdlorabrowser', (lora) => { toggleSelectLora(cleanModelName(lora.data.name)); });
+let sdEmbedBrowser = new ModelBrowserWrapper('Embedding', ['embedding', 'textual-inversion'], 'embedding_list', 'sdembedbrowser', (embed) => { selectEmbedding(embed.data); });
+let sdControlnetBrowser = new ModelBrowserWrapper('ControlNet', ['controlnet', 'control-lora'], 'controlnet_list', 'sdcontrolnetbrowser', (controlnet) => { setControlNet(controlnet.data); });
+let wildcardsBrowser = new ModelBrowserWrapper('Wildcards', [], 'wildcard_list', 'wildcardsbrowser', (wildcard) => { selectWildcard(wildcard.data); }, `<button id="wildcards_list_create_new_button" class="refresh-button" onclick="create_new_wildcard_button()">Create New Wildcard</button>`);
 
 let allModelBrowsers = [sdModelBrowser, sdVAEBrowser, sdLoraBrowser, sdEmbedBrowser, sdControlnetBrowser, wildcardsBrowser];
 
@@ -862,6 +872,18 @@ function currentModelChanged() {
         directSetModel(data.model);
         noModelChangeDup = false;
     });
+}
+
+function doModelInstallRequiredCheck() {
+    if (curModelSpecialFormat == 'bnb_nf4' && !currentBackendFeatureSet.includes('bnb_nf4') && !localStorage.getItem('hide_bnb_nf4_check')) {
+        $('#bnb_nf4_installer').modal('show');
+        return true;
+    }
+    if (curModelSpecialFormat == 'gguf' && !currentBackendFeatureSet.includes('gguf') && !localStorage.getItem('hide_gguf_check')) {
+        $('#gguf_installer').modal('show');
+        return true;
+    }
+    return false;
 }
 
 getRequiredElementById('current_model').addEventListener('change', currentModelChanged);
