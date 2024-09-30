@@ -19,7 +19,11 @@ namespace SwarmUI.Builtin_ComfyUIBackend;
 
 public abstract class ComfyUIAPIAbstractBackend : AbstractT2IBackend
 {
-    public abstract string Address { get; }
+    /// <summary>Get the network API address for the comfy instance.</summary>
+    public abstract string APIAddress { get; }
+
+    /// <summary>Get the web frontend address for the comfy instance.</summary>
+    public abstract string WebAddress { get; }
 
     /// <summary>Internal HTTP handler.</summary>
     public static HttpClient HttpClient = NetworkBackendUtils.MakeHttpClient();
@@ -103,7 +107,7 @@ public abstract class ComfyUIAPIAbstractBackend : AbstractT2IBackend
     public async Task InitInternal(bool ignoreWebError)
     {
         MaxUsages = 1 + OverQueue;
-        if (string.IsNullOrWhiteSpace(Address))
+        if (string.IsNullOrWhiteSpace(APIAddress))
         {
             Status = BackendStatus.DISABLED;
             return;
@@ -178,6 +182,10 @@ public abstract class ComfyUIAPIAbstractBackend : AbstractT2IBackend
         Logs.Verbose("Will await a job, do parse...");
         JObject workflowJson = Utilities.ParseToJson(workflow);
         Logs.Verbose("JSON parsed.");
+        JObject metadataObj = user_input.GenMetadataObject();
+        metadataObj["is_preview"] = true;
+        metadataObj["preview_notice"] = "Image is not done generating";
+        string previewMetadata = T2IParamInput.MetadataToString(metadataObj);
         int expectedNodes = workflowJson.Count;
         string id = null;
         ClientWebSocket socket = null;
@@ -201,7 +209,7 @@ public abstract class ComfyUIAPIAbstractBackend : AbstractT2IBackend
             {
                 Logs.Verbose("Need to connect a websocket...");
                 id = Guid.NewGuid().ToString();
-                socket = await NetworkBackendUtils.ConnectWebsocket(Address, $"ws?clientId={id}");
+                socket = await NetworkBackendUtils.ConnectWebsocket(APIAddress, $"ws?clientId={id}");
                 Logs.Verbose("Connected.");
             }
         }
@@ -219,12 +227,18 @@ public abstract class ComfyUIAPIAbstractBackend : AbstractT2IBackend
         float curPercent = 0;
         void yieldProgressUpdate()
         {
-            takeOutput(new JObject()
+            JObject toSend = new()
             {
                 ["batch_index"] = batchId,
                 ["overall_percent"] = nodesDone / (float)expectedNodes,
                 ["current_percent"] = curPercent
-            });
+            };
+            if (previewMetadata is not null)
+            {
+                toSend["metadata"] = previewMetadata;
+                previewMetadata = null;
+            }
+            takeOutput(toSend);
         }
         try
         {
@@ -233,7 +247,7 @@ public abstract class ComfyUIAPIAbstractBackend : AbstractT2IBackend
             {
                 Logs.Verbose($"Will use workflow: {JObject.Parse(workflow).ToDenseDebugString()}");
             }
-            JObject promptResult = await HttpClient.PostJSONString($"{Address}/prompt", workflow, interrupt);
+            JObject promptResult = await HttpClient.PostJSONString($"{APIAddress}/prompt", workflow, interrupt);
             if (Logs.MinimumLevel <= Logs.LogLevel.Verbose)
             {
                 Logs.Verbose($"ComfyUI prompt said: {promptResult.ToDenseDebugString()}");
@@ -256,7 +270,7 @@ public abstract class ComfyUIAPIAbstractBackend : AbstractT2IBackend
                 {
                     hasInterrupted = true;
                     Logs.Debug("ComfyUI Interrupt requested");
-                    await HttpClient.PostAsync($"{Address}/interrupt", new StringContent(""), Program.GlobalProgramCancel);
+                    await HttpClient.PostAsync($"{APIAddress}/interrupt", new StringContent(""), Program.GlobalProgramCancel);
                 }
                 byte[] output = await socket.ReceiveData(100 * 1024 * 1024, Program.GlobalProgramCancel);
                 if (output is not null)
@@ -490,7 +504,7 @@ public abstract class ComfyUIAPIAbstractBackend : AbstractT2IBackend
                 {
                     type = Image.ImageType.VIDEO;
                 }
-                byte[] image = await(await HttpClient.GetAsync($"{Address}/view?filename={HttpUtility.UrlEncode(fname)}&type={imType}", interrupt)).Content.ReadAsByteArrayAsync(interrupt);
+                byte[] image = await(await HttpClient.GetAsync($"{APIAddress}/view?filename={HttpUtility.UrlEncode(fname)}&type={imType}", interrupt)).Content.ReadAsByteArrayAsync(interrupt);
                 if (image == null || image.Length == 0)
                 {
                     Logs.Error($"Invalid/null/empty image data from ComfyUI server for '{fname}', under {outData.ToDenseDebugString()}");
@@ -708,7 +722,7 @@ public abstract class ComfyUIAPIAbstractBackend : AbstractT2IBackend
                         { new ByteArrayContent(fixedImage.ImageData), "image", fname },
                         { new StringContent("true"), "overwrite" }
                     };
-                    HttpClient.PostAsync($"{Address}/upload/image", content).Wait();
+                    HttpClient.PostAsync($"{APIAddress}/upload/image", content).Wait();
                     completeSteps.Add(() =>
                     {
                         if (!RemoveInputFile(fname))
@@ -764,12 +778,12 @@ public abstract class ComfyUIAPIAbstractBackend : AbstractT2IBackend
 
     public async Task<JType> SendGet<JType>(string url, CancellationToken token) where JType : class
     {
-        return await NetworkBackendUtils.Parse<JType>(await HttpClient.GetAsync($"{Address}/{url}", token));
+        return await NetworkBackendUtils.Parse<JType>(await HttpClient.GetAsync($"{APIAddress}/{url}", token));
     }
 
     public async Task<JType> SendPost<JType>(string url, JObject payload) where JType : class
     {
-        return await NetworkBackendUtils.Parse<JType>(await HttpClient.PostAsync($"{Address}/{url}", Utilities.JSONContent(payload)));
+        return await NetworkBackendUtils.Parse<JType>(await HttpClient.PostAsync($"{APIAddress}/{url}", Utilities.JSONContent(payload)));
     }
 
     /// <inheritdoc/>

@@ -27,6 +27,10 @@ public class ComfyUISelfStartBackend : ComfyUIAPIAbstractBackend
         [ManualSettingsOptions(Impl = null, Vals = ["true", "aggressive", "false"], ManualNames = ["Always Update", "Always Aggressively Update (Force-Update)", "Don't Update"])]
         public string AutoUpdate = "true";
 
+        [ConfigComment("Which version of the ComfyUI frontend to enable.\n'Latest' uses the latest version available (including dev commits).\n'None' uses whatever is baked into ComfyUI itself.\n'Latest Swarm Validated' uses the latest version that Swarm has been tested and confirmed to work with.\n'Legacy' uses the pre-September-2024 legacy UI.")]
+        [ManualSettingsOptions(Impl = null, Vals = ["Latest", "None", "LatestSwarmValidated", "Legacy"], ManualNames = ["Latest", "None", "Latest Swarm Validated", "Legacy (Pre Sept 2024)"])]
+        public string FrontendVersion = "LatestSwarmValidated";
+
         [ConfigComment("If checked, tells Comfy to generate image previews. If unchecked, previews will not be generated, and images won't show up until they're done.")]
         public bool EnablePreviews = true;
 
@@ -44,7 +48,9 @@ public class ComfyUISelfStartBackend : ComfyUIAPIAbstractBackend
 
     public int Port;
 
-    public override string Address => $"http://localhost:{Port}";
+    public override string APIAddress => $"http://localhost:{Port}";
+
+    public override string WebAddress => $"http://localhost:{Port}";
 
     public override bool CanIdle => false;
 
@@ -154,7 +160,7 @@ public class ComfyUISelfStartBackend : ComfyUIAPIAbstractBackend
     }
 
     /// <summary>Names of folders in comfy paths that should be blindly forwarded to correct for Comfy not properly propagating base_path without manual forwards.</summary>
-    public static List<string> FoldersToForwardInComfyPath = ["clip", "unet", "diffusion_models", "gligen", "ipadapter", "yolov8", "tensorrt", "clipseg"];
+    public static List<string> FoldersToForwardInComfyPath = ["unet", "diffusion_models", "gligen", "ipadapter", "yolov8", "tensorrt", "clipseg"];
 
     /// <summary>Filepaths to where custom node packs for comfy can be found, such as extension dirs.</summary>
     public static List<string> CustomNodePaths = [];
@@ -168,7 +174,7 @@ public class ComfyUISelfStartBackend : ComfyUIAPIAbstractBackend
                 return;
             }
             AddLoadStatus($"Will emit comfy model paths file...");
-            string root = Utilities.CombinePathWithAbsolute(Environment.CurrentDirectory, Program.ServerSettings.Paths.ModelRoot);
+            string root = Program.ServerSettings.Paths.ActualModelRoot;
             string yaml = $"""
             swarmui:
                 base_path: {root}
@@ -193,6 +199,9 @@ public class ComfyUISelfStartBackend : ComfyUIAPIAbstractBackend
                 controlnet: |
                     {Program.ServerSettings.Paths.SDControlNetsFolder}
                     ControlNet
+                clip: |
+                    {Program.ServerSettings.Paths.SDClipFolder}
+                    clip
                 clip_vision: |
                     {Program.ServerSettings.Paths.SDClipVisionFolder}
                     clip_vision
@@ -219,6 +228,7 @@ public class ComfyUISelfStartBackend : ComfyUIAPIAbstractBackend
                 """;
             }
             Directory.CreateDirectory(Utilities.CombinePathWithAbsolute(root, Program.ServerSettings.Paths.SDClipVisionFolder));
+            Directory.CreateDirectory(Utilities.CombinePathWithAbsolute(root, Program.ServerSettings.Paths.SDClipFolder));
             Directory.CreateDirectory($"{root}/upscale_models");
             File.WriteAllBytes($"{Program.DataDir}/comfy-auto-model.yaml", yaml.EncodeUTF8());
             IsComfyModelFileEmitted = true;
@@ -259,6 +269,19 @@ public class ComfyUISelfStartBackend : ComfyUIAPIAbstractBackend
             {
                 addedArgs += " --preview-method latent2rgb";
             }
+            if (settings.FrontendVersion == "Latest")
+            {
+                addedArgs += " --front-end-version Comfy-Org/ComfyUI_frontend@latest";
+            }
+            else if (settings.FrontendVersion == "LatestSwarmValidated")
+            {
+                addedArgs += " --front-end-version Comfy-Org/ComfyUI_frontend@v1.2.47";
+            }
+            else if (settings.FrontendVersion == "Legacy")
+            {
+                addedArgs += " --front-end-version Comfy-Org/ComfyUI_legacy_frontend@latest";
+            }
+            // None needs no arg
             AddLoadStatus($"Will add args: {addedArgs}");
         }
         settings.StartScript = settings.StartScript.Trim(' ', '"', '\'', '\n', '\r', '\t');
