@@ -119,6 +119,51 @@ function close_edit_wildcard() {
     $('#edit_wildcard_modal').modal('hide');
 }
 
+function editModelGetHashNow() {
+    if (curModelMenuModel == null) {
+        return;
+    }
+    let model = curModelMenuModel;
+    genericRequest('GetModelHash', { 'modelName': curModelMenuModel.name, 'subtype': curModelMenuBrowser.subType }, data => {
+        model.hash = data.hash;
+        if (curModelMenuModel == model) {
+            editModelFillTechnicalInfo(curModelMenuModel);
+        }
+    });
+}
+
+function editModelFillTechnicalInfo(model) {
+    let technical = `${translate('Created')}: ${escapeHtml(formatDateTime(new Date(model.time_created)))}\n<br>${translate('Modified')}: ${escapeHtml(formatDateTime(new Date(model.time_modified)))}`;
+    if (model.hash) {
+        technical += `\n<br>${translate('Hash')}: ${escapeHtml(model.hash)}`;
+    }
+    else {
+        technical += `\n<br>${translate('Hash')}: ${translate('(Not available)')} <button class="btn btn-primary basic-button small-button translate" onclick="editModelGetHashNow()" title="Scan the file data and build a hash, then update its value into the model metadata">${translate('Load Hash')}</button>`;
+    }
+    getRequiredElementById('edit_model_technical_data').innerHTML = technical;
+}
+
+/** Returns either the expected CivitAI url for a model, or empty string if unknown. */
+function getCivitUrlGuessFor(model) {
+    if (!model.description) {
+        return '';
+    }
+    let civitUrl = '';
+    // (Hacky but we don't have a dedicated datastore for this, just included at the top of descriptions generally)
+    let civitUrlStartIndex = model.description.indexOf('<a href="https://civitai.com/models/');
+    if (civitUrlStartIndex != -1) {
+        let end = model.description.indexOf('"', civitUrlStartIndex + '<a href="'.length);
+        if (end != -1) {
+            civitUrl = model.description.substring(civitUrlStartIndex + '<a href="'.length, end);
+            if (!civitUrl.includes("?modelVersionId=") || civitUrl.length > 200) {
+                console.log(`Invalid CivitAI URL (failed sanity check): ${civitUrl}`);
+                civitUrl = '';
+            }
+        }
+    }
+    return civitUrl;
+}
+
 function editModel(model, browser) {
     if (model == null) {
         return;
@@ -144,11 +189,9 @@ function editModel(model, browser) {
         }
         enableImage.disabled = false;
     }
-    let technical = `Created: ${formatDateTime(new Date(model.time_created))}\nModified: ${formatDateTime(new Date(model.time_modified))}`;
-    if (model.hash) {
-        technical += `\nHash: ${model.hash}`;
-    }
-    getRequiredElementById('edit_model_technical_data').innerText = technical;
+    editModelFillTechnicalInfo(model);
+    getRequiredElementById('edit_model_civitai_url').value = getCivitUrlGuessFor(model);
+    getRequiredElementById('edit_model_civitai_info').innerText = '';
     getRequiredElementById('edit_model_name').value = model.title || model.name;
     let modelTypeSelector = getRequiredElementById('edit_model_type');
     modelTypeSelector.value = model.architecture || '';
@@ -176,7 +219,25 @@ function edit_model_load_civitai() {
     let url = getRequiredElementById('edit_model_civitai_url').value;
     let info = getRequiredElementById('edit_model_civitai_info');
     if (!url) {
-        info.innerText = 'No URL provided.';
+        let model = curModelMenuModel;
+        info.innerText = 'Loading hash...';
+        genericRequest('GetModelHash', { 'modelName': curModelMenuModel.name, 'subtype': curModelMenuBrowser.subType }, data => {
+            model.hash = data.hash;
+            if (curModelMenuModel == model) {
+                editModelFillTechnicalInfo(curModelMenuModel);
+                info.innerText = 'Hash loaded, searching civitai...';
+                modelDownloader.searchCivitaiForHash(model.hash, (url) => {
+                    if (url) {
+                        info.innerText = 'URL found, loading...';
+                        getRequiredElementById('edit_model_civitai_url').value = url;
+                        edit_model_load_civitai();
+                    }
+                    else {
+                        info.innerText = 'No CivitAI URL found for this model hash.';
+                    }
+                });
+            }
+        });
         return;
     }
     let [id, versId] = modelDownloader.parseCivitaiUrl(url);
