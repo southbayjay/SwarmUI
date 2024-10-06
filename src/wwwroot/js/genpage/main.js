@@ -82,7 +82,8 @@ function copy_current_image_params() {
         alert('No parameters to copy!');
         return;
     }
-    let metadata = JSON.parse(currentMetadataVal).sui_image_params;
+    let readable = interpretMetadata(currentMetadataVal);
+    let metadata = JSON.parse(readable).sui_image_params;
     if ('original_prompt' in metadata) {
         metadata.prompt = metadata.original_prompt;
     }
@@ -129,6 +130,9 @@ function copy_current_image_params() {
         metadata.loras = newLoras;
         metadata.loraweights = newWeights;
     }
+    if (!('aspectratio' in metadata) && 'width' in metadata && 'height' in metadata) {
+        metadata.aspectratio = 'Custom';
+    }
     let exclude = getUserSetting('reuseparamexcludelist').split(',').map(s => cleanParamName(s));
     resetParamsToDefault(exclude);
     for (let param of gen_param_types) {
@@ -139,11 +143,6 @@ function copy_current_image_params() {
         let val = metadata[param.id];
         if (elem && val !== undefined && val !== null && val !== '') {
             setDirectParamValue(param, val);
-            if (param.toggleable && param.visible) {
-                let toggle = getRequiredElementById(`input_${param.id}_toggle`);
-                toggle.checked = true;
-                doToggleEnable(elem.id);
-            }
             if (param.group && param.group.toggles) {
                 let toggle = getRequiredElementById(`input_group_content_${param.group.id}_toggle`);
                 if (!toggle.checked) {
@@ -539,6 +538,9 @@ function toggleStar(path, rawSrc) {
 
 function setCurrentImage(src, metadata = '', batchId = '', previewGrow = false, smoothAdd = false, canReparse = true) {
     currentImgSrc = src;
+    if (metadata) {
+        metadata = interpretMetadata(metadata);
+    }
     currentMetadataVal = metadata;
     if ((smoothAdd || !metadata) && canReparse) {
         let image = new Image();
@@ -707,7 +709,7 @@ function setCurrentImage(src, metadata = '', batchId = '', previewGrow = false, 
             metaParsed = JSON.parse(metadata) || metaParsed;
         }
         catch (e) {
-            console.log(`Error parsing metadata for image: ${e}, metadata was ${metadata}`);
+            console.log(`Error parsing metadata for image: '${e}', metadata was '${metadata}'`);
         }
     }
     includeButton(metaParsed.is_starred ? 'Starred' : 'Star', (e, button) => {
@@ -2009,10 +2011,11 @@ function upvertAutoWebuiMetadataToSwarm(metadata) {
     // just a mishmash of text, and there's no way to necessarily predict newlines/colons/etc,
     // so just make best effort to import based on some easy examples
     if (metadata.includes("\nNegative prompt: ")) {
-        let parts = metadata.split("\nNegative prompt: ");
+        let parts = metadata.split("\nNegative prompt: ", 2);
         realData['prompt'] = parts[0];
-        realData['negativeprompt'] = parts[1];
-        metadata = parts.slice(2).join("\n");
+        let subSplit = parts[1].split("\n", 2);
+        realData['negativeprompt'] = subSplit[0];
+        metadata = subSplit[1];
     }
     else {
         let lines = metadata.split('\n');
