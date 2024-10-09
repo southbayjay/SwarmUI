@@ -18,13 +18,8 @@ In the future when more extensions exist, we'll build out more support for easil
 
 ### How To Find Extensions
 
-For now, manual list of known extensions:
+Launch Swarm and go to `Server` -> `Extensions`
 
-- [FaceTools](https://github.com/Quaggles/SwarmUI-FaceTools) adds support for CodeFormer FaceRestore, and ReActor.
-- [WaifuDiffusionV](https://github.com/waifu-diffusion/SwarmWaifuDiffusionV) adds support for WaifuDiffusion-V EDM sampling.
-- [ComfyDeployBackendExt](https://github.com/mcmonkey4eva/SwarmComfyDeployBackendExt) adds a [ComfyDeploy](https://www.comfydeploy.com/) backend.
-- [MagicPrompt](https://github.com/kalebbroo/SwarmUI-MagicPromptExtension) provides LLM (language model) usage inside SwarmUI to enhance your prompts.
+(Temporary): for now, click the link in the extensions page to view the github repo and install it manually. In the near future an easy installer UI will be provided.
 
 See also the Extensions channel in The SwarmUI Discord.
-
-In the future if more extensions exist, there will be a better manager for these.
