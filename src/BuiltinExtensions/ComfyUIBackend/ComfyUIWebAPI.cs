@@ -165,10 +165,11 @@ public static class ComfyUIWebAPI
         return new JObject() { ["success"] = true };
     }
 
+    /// <summary>Lock to prevent overlapping comfy feature installs.</summary>
     public static SemaphoreSlim MultiInstallLock = new(1, 1);
 
     /// <summary>API route to ensure to install a given ComfyUI custom node feature.</summary>
-    public static async Task<JObject> ComfyInstallFeatures(Session session, string feature)
+    public static async Task<JObject> ComfyInstallFeatures(Session session, string features)
     {
         await MultiInstallLock.WaitAsync(Program.GlobalProgramCancel);
         try
@@ -176,31 +177,43 @@ public static class ComfyUIWebAPI
             ComfyUISelfStartBackend backend = Program.Backends.RunningBackendsOfType<ComfyUISelfStartBackend>().FirstOrDefault();
             if (backend is null)
             {
-                Logs.Warning($"User {session.User.UserID} tried to install feature '{feature}' but have no comfy self-start backends.");
+                Logs.Warning($"User {session.User.UserID} tried to install feature '{features}' but have no comfy self-start backends.");
                 return new JObject() { ["error"] = $"Cannot install Comfy features as this Swarm instance has no running ComfyUI Self-Start backends currently." };
             }
-            async Task<JObject> doRepo(string path, bool skipPipCache = false)
+            features = features.ToLowerFast();
+            List<InstallableFeatures.ComfyInstallableFeature> installMe = [];
+            foreach (string feature in features.Split(',').Select(f => f.Trim()))
             {
-                bool didRestart = await backend.EnsureNodeRepo(path, skipPipCache);
-                if (!didRestart)
+                if (!InstallableFeatures.ComfyFeatures.TryGetValue(feature, out InstallableFeatures.ComfyInstallableFeature featureData))
                 {
-                    _ = Utilities.RunCheckedTask(ComfyUIBackendExtension.RestartAllComfyBackends);
+                    Logs.Warning($"User {session.User.UserID} tried to install unknown feature '{feature}'.");
+                    return new JObject() { ["error"] = $"Unknown feature ID {feature}." };
                 }
-                return new JObject() { ["success"] = true };
+                installMe.Add(featureData);
             }
-            feature = feature.ToLowerFast().Trim();
-            if (feature == "ipadapter") { return await doRepo("https://github.com/cubiq/ComfyUI_IPAdapter_plus"); }
-            else if (feature == "controlnet_preprocessors") { return await doRepo("https://github.com/Fannovel16/comfyui_controlnet_aux"); }
-            else if (feature == "frame_interpolation") { return await doRepo("https://github.com/Fannovel16/ComfyUI-Frame-Interpolation"); }
-            else if (feature == "comfyui_tensorrt") { return await doRepo("https://github.com/comfyanonymous/ComfyUI_TensorRT", skipPipCache: true); }
-            else if (feature == "sam2") { return await doRepo("https://github.com/kijai/ComfyUI-segment-anything-2"); }
-            else if (feature == "bnb_nf4") { return await doRepo("https://github.com/comfyanonymous/ComfyUI_bitsandbytes_NF4"); }
-            else if (feature == "gguf") { return await doRepo("https://github.com/city96/ComfyUI-GGUF"); }
-            else
+            ComfyUISelfStartBackend[] backendsToStart = [];
+            bool doFullRestart = false;
+            foreach (InstallableFeatures.ComfyInstallableFeature featureData in installMe)
             {
-                Logs.Warning($"User {session.User.UserID} tried to install unknown feature '{feature}'.");
-                return new JObject() { ["error"] = $"Unknown feature ID {feature}." };
+                ComfyUISelfStartBackend[] backendsStopped = await backend.EnsureNodeRepo(featureData.URL, featureData.SkipPipCache, false);
+                if (backendsStopped is null)
+                {
+                    doFullRestart = true;
+                }
+                else
+                {
+                    backendsToStart = [.. backendsToStart.Concat(backendsStopped).Distinct()];
+                }
             }
+            if (doFullRestart)
+            {
+                _ = Utilities.RunCheckedTask(ComfyUIBackendExtension.RestartAllComfyBackends);
+            }
+            foreach (ComfyUISelfStartBackend backendToStart in backendsToStart)
+            {
+                Program.Backends.DoInitBackend(backendToStart.BackendData);
+            }
+            return new JObject() { ["success"] = true };
         }
         finally
         {

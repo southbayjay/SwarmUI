@@ -28,7 +28,9 @@ public static class AdminAPI
         API.RegisterAPICall(DebugLanguageAdd, true);
         API.RegisterAPICall(DebugGenDocs, true);
         API.RegisterAPICall(ListConnectedUsers);
-        API.RegisterAPICall(UpdateAndRestart);
+        API.RegisterAPICall(UpdateAndRestart, true);
+        API.RegisterAPICall(InstallExtension, true);
+        API.RegisterAPICall(UpdateExtension, true);
     }
 
     public static JObject AutoConfigToParamData(AutoConfiguration config)
@@ -439,19 +441,72 @@ public static class AdminAPI
             "success": true, // or false if not updated
             "result": "No changes found." // or any other applicable human-readable English message
         """)]
-    public static async Task<JObject> UpdateAndRestart(Session session)
+    public static async Task<JObject> UpdateAndRestart(Session session,
+        [API.APIParameter("True to always rebuild and restart even if there's no visible update.")] bool force = false)
     {
         Logs.Warning($"User {session.User.UserID} requested update-and-restart.");
         string priorHash = (await Utilities.RunGitProcess("rev-parse HEAD")).Trim();
-        await Utilities.RunGitProcess("pull");
+        string pullResult = await Utilities.RunGitProcess("pull");
+        if (pullResult.Contains("error: Your local changes to the following files would be overwritten by merge:"))
+        {
+            return new JObject() { ["error"] = "Git pull failed because you have local changes to source files.\nPlease remove them, or manually run 'git pull --autostash', or 'git fetch origin && git checkout -f master' in the SwarmUI folder." };
+        }
         string localHash = (await Utilities.RunGitProcess("rev-parse HEAD")).Trim();
         Logs.Debug($"Update checker: prior hash was {priorHash}, new hash is {localHash}");
-        if (priorHash == localHash)
+        if (priorHash == localHash && !force)
         {
             return new JObject() { ["success"] = false, ["result"] = "No changes found." };
         }
         File.WriteAllText("src/bin/must_rebuild", "yes");
         _ = Utilities.RunCheckedTask(() => Program.Shutdown(42));
         return new JObject() { ["success"] = true, ["result"] = "Update successful. Restarting... (please wait a moment, then refresh the page)" };
+    }
+
+    [API.APIDescription("Installs an extension from the known extensions list. Does not trigger a restart. Does signal required rebuild.",
+        """
+            "success": true
+        """)]
+    public static async Task<JObject> InstallExtension(Session session,
+        [API.APIParameter("The name of the extension to install, from the known extensions list.")] string extensionName)
+    {
+        ExtensionsManager.ExtensionInfo ext = Program.Extensions.KnownExtensions.FirstOrDefault(e => e.Name == extensionName);
+        if (ext is null)
+        {
+            return new JObject() { ["error"] = "Unknown extension." };
+        }
+        string extensionsFolder = Utilities.CombinePathWithAbsolute(Environment.CurrentDirectory, "src/Extensions");
+        string folder = Utilities.CombinePathWithAbsolute(extensionsFolder, ext.FolderName);
+        if (Directory.Exists(folder))
+        {
+            return new JObject() { ["error"] = "Extension already installed." };
+        }
+        await Utilities.RunGitProcess($"clone {ext.URL}", extensionsFolder);
+        File.WriteAllText("src/bin/must_rebuild", "yes");
+        return new JObject() { ["success"] = true };
+    }
+
+    [API.APIDescription("Triggers an extension update for an installed extension. Does not trigger a restart. Does signal required rebuild.",
+        """
+            "success": true // or false if no update available
+        """)]
+    public static async Task<JObject> UpdateExtension(Session session,
+        [API.APIParameter("The name of the extension to update.")] string extensionName)
+    {
+        Extension ext = Program.Extensions.Extensions.FirstOrDefault(e => e.ExtensionName == extensionName);
+        if (ext is null)
+        {
+            return new JObject() { ["error"] = "Unknown extension." };
+        }
+        string path = Path.GetFullPath(Utilities.CombinePathWithAbsolute(Environment.CurrentDirectory, ext.FilePath));
+        string priorHash = (await Utilities.RunGitProcess("rev-parse HEAD", path)).Trim();
+        await Utilities.RunGitProcess("pull", path);
+        string localHash = (await Utilities.RunGitProcess("rev-parse HEAD", path)).Trim();
+        Logs.Debug($"Extension updater: prior hash was {priorHash}, new hash is {localHash}");
+        if (priorHash == localHash)
+        {
+            return new JObject() { ["success"] = false };
+        }
+        File.WriteAllText("src/bin/must_rebuild", "yes");
+        return new JObject() { ["success"] = true };
     }
 }

@@ -416,21 +416,21 @@ function genInputs(delay_final = false) {
         if (controlnetGroup) {
             controlnetGroup.append(createDiv(`controlnet_button_preview`, null, `<button class="basic-button" onclick="controlnetShowPreview()">Preview</button>`));
             if (!currentBackendFeatureSet.includes('controlnetpreprocessors')) {
-                controlnetGroup.append(createDiv(`controlnet_install_preprocessors`, null, `<button class="basic-button" onclick="installControlnetPreprocessors()">Install Controlnet Preprocessors</button>`));
+                controlnetGroup.append(createDiv(`controlnet_install_preprocessors`, 'keep_group_visible', `<button class="basic-button" onclick="installFeatureById('controlnet_preprocessors', 'controlnet_install_preprocessors')">Install Controlnet Preprocessors</button>`));
             }
         }
         let revisionGroup = document.getElementById('input_group_content_revision');
         if (revisionGroup && !currentBackendFeatureSet.includes('ipadapter')) {
-            revisionGroup.append(createDiv(`revision_install_ipadapter`, null, `<button class="basic-button" onclick="revisionInstallIPAdapter()">Install IP Adapter</button>`));
+            revisionGroup.append(createDiv(`revision_install_ipadapter`, null, `<button class="basic-button" onclick="installFeatureById('ipadapter', 'revision_install_ipadapter')">Install IP Adapter</button>`));
         }
         let videoGroup = document.getElementById('input_group_content_video');
         if (videoGroup && !currentBackendFeatureSet.includes('frameinterps')) {
-            videoGroup.append(createDiv(`video_install_frameinterps`, null, `<button class="basic-button" onclick="installVideoRife()">Install Frame Interpolation</button>`));
+            videoGroup.append(createDiv(`video_install_frameinterps`, 'keep_group_visible', `<button class="basic-button" onclick="installFeatureById('frame_interpolation', 'video_install_frameinterps')">Install Frame Interpolation</button>`));
         }
-        hideUnsupportableParams();
         for (let runnable of postParamBuildSteps) {
             runnable();
         }
+        hideUnsupportableParams();
         let loras = document.getElementById('input_loras');
         if (loras) {
             reapplyLoraWeights();
@@ -759,7 +759,7 @@ function hideUnsupportableParams() {
     for (let group in groups) {
         let groupData = groups[group];
         let groupElem = getRequiredElementById(`auto-group-${group}`);
-        if (groupData.visible == 0) {
+        if (groupData.visible == 0 && !groupElem.querySelector('.keep_group_visible')) {
             groupElem.style.display = 'none';
         }
         else {

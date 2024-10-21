@@ -1,4 +1,5 @@
 ﻿using FreneticUtilities.FreneticExtensions;
+using FreneticUtilities.FreneticToolkit;
 using Newtonsoft.Json.Linq;
 using SwarmUI.Core;
 using SwarmUI.Utils;
@@ -45,6 +46,9 @@ public class T2IModel(T2IModelHandler handler, string folderPath, string filePat
 
     /// <summary>Set of all model file extensions that are considered natively supported.</summary>
     public static HashSet<string> NativelySupportedModelExtensions = ["safetensors", "sft", "engine", "gguf"];
+
+    /// <summary>Set of all model file extensions that are considered supported for legacy reasons only.</summary>
+    public static HashSet<string> LegacyModelExtensions = ["ckpt", "pt", "pth", "bin"];
 
     /// <summary>Returns the model's SHA-256 Tensor Hash - either from metadata, or by generating it from the file.
     /// Returns null if hashing is impossible (no handler, no metadata construct, no source file).
@@ -266,5 +270,20 @@ public class T2IModel(T2IModelHandler handler, string folderPath, string filePat
     public override string ToString()
     {
         return Name.Replace('/', Path.DirectorySeparatorChar);
+    }
+
+    public static AsciiMatcher DangerousModelNameChars = new("\n\t,%*\"<>");
+
+    /// <summary>Display any necessary warnings related to this model in logs.</summary>
+    public void AutoWarn()
+    {
+        if (DangerousModelNameChars.ContainsAnyMatch(Name))
+        {
+            Logs.Warning($"{Handler?.ModelType} model '{Name}' contains special characters in its name, which might cause parsing issues. Consider renaming the file (or folder).");
+        }
+        if (Handler?.ModelType == "Embedding" && Name.Contains(' '))
+        {
+            Logs.Warning($"Embedding model '{Name}' contains spaces in its name, which will cause it to not parse properly on the backend. Please rename the file or folder to remove spaces.");
+        }
     }
 }

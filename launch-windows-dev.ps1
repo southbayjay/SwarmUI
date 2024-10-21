@@ -19,4 +19,9 @@ $Env:ASPNETCORE_ENVIRONMENT = "Production"
 $Env:ASPNETCORE_URLS = "http://*:7801"
 
 # Actual runner.
-dotnet src\bin\live_release\SwarmUI.dll --environment dev @args
+.\src\bin\live_release\SwarmUI.exe --environment dev @args
+
+# Exit code 42 means restart, anything else = don't.
+if ($LASTEXITCODE -eq 42) {
+    .\launch-windows-dev.ps1 @args
+}

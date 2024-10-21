@@ -62,7 +62,7 @@ public class ComfyUISelfStartBackend : ComfyUIAPIAbstractBackend
     public static bool IsComfyModelFileEmitted = false;
 
     /// <summary>Downloads or updates the named relevant ComfyUI custom node repo.</summary>
-    public async Task<bool> EnsureNodeRepo(string url, bool skipPipCache = false)
+    public async Task<ComfyUISelfStartBackend[]> EnsureNodeRepo(string url, bool skipPipCache = false, bool doRestart = true)
     {
         AddLoadStatus($"Will ensure node repo '{url}'...");
         string nodePath = Path.GetFullPath(ComfyUIBackendExtension.Folder + "/DLNodes");
@@ -99,13 +99,16 @@ public class ComfyUISelfStartBackend : ComfyUIAPIAbstractBackend
                     Logs.Error($"Failed to install comfy backend node requirements: {ex.ReadableString()}");
                     AddLoadStatus($"Error during requirements installation.");
                 }
-                AddLoadStatus($"Will re-start any backends shut down by the install...");
-                foreach (ComfyUISelfStartBackend backend in backends)
+                if (doRestart)
                 {
-                    AddLoadStatus($"Will re-start backend {backend.BackendData.ID}...");
-                    Program.Backends.DoInitBackend(backend.BackendData);
+                    AddLoadStatus($"Will re-start any backends shut down by the install...");
+                    foreach (ComfyUISelfStartBackend backend in backends)
+                    {
+                        AddLoadStatus($"Will re-start backend {backend.BackendData.ID}...");
+                        Program.Backends.DoInitBackend(backend.BackendData);
+                    }
                 }
-                return true;
+                return backends;
             }
         }
         else
@@ -114,7 +117,7 @@ public class ComfyUISelfStartBackend : ComfyUIAPIAbstractBackend
             string response = await Utilities.RunGitProcess($"pull", $"{nodePath}/{folderName}");
             AddLoadStatus($"Node pull response for {folderName}: {response.Trim()}");
         }
-        return false;
+        return null;
     }
 
     public async Task EnsureNodeRepos()
@@ -128,12 +131,11 @@ public class ComfyUISelfStartBackend : ComfyUIAPIAbstractBackend
             {
                 Directory.CreateDirectory(nodePath);
             }
-            List<Task> tasks =
-            [
-                Task.Run(async () => await EnsureNodeRepo("https://github.com/mcmonkeyprojects/sd-dynamic-thresholding")),
-                Task.Run(async () => await EnsureNodeRepo("https://github.com/Stability-AI/ComfyUI-SAI_API"))
-            ];
-            await Task.WhenAll(tasks);
+            List<Task> tasks = [.. InstallableFeatures.ComfyFeatures.Values.Where(f => f.AutoInstall).Select(f => Utilities.RunCheckedTask(async () => await EnsureNodeRepo(f.URL)))];
+            if (tasks.Any())
+            {
+                await Task.WhenAll(tasks);
+            }
             tasks.Clear();
             foreach (string node in Directory.EnumerateDirectories(nodePath))
             {
@@ -342,17 +344,10 @@ public class ComfyUISelfStartBackend : ComfyUIAPIAbstractBackend
                 await p.WaitForExitAsync(Program.GlobalProgramCancel);
                 AddLoadStatus($"Done installing '{pipName}' for ComfyUI.");
             }
-            // ComfyUI added these dependencies, didn't used to have it
-            await install("kornia", "kornia");
-            await install("sentencepiece", "sentencepiece");
-            await install("spandrel", "spandrel");
-            // Other added dependencies
-            await install("rembg", "rembg");
-            await install("matplotlib", "matplotlib==3.9"); // Old version due to "mesonpy" curse
-            await install("opencv_python_headless", "opencv-python-headless");
-            await install("imageio_ffmpeg", "imageio-ffmpeg");
-            await install("dill", "dill");
-            await install("ultralytics", "ultralytics==8.1.47"); // Old version due to "mesonpy" curse
+            foreach ((string libFolder, string pipName) in RequiredPythonPackages)
+            {
+                await install(libFolder, pipName);
+            }
             if (Directory.Exists($"{ComfyUIBackendExtension.Folder}/DLNodes/ComfyUI_IPAdapter_plus"))
             {
                 // FaceID IPAdapter models need these, really inconvenient to make dependencies conditional, so...
@@ -372,6 +367,22 @@ public class ComfyUISelfStartBackend : ComfyUIAPIAbstractBackend
         AddLoadStatus("Starting self-start ComfyUI process...");
         await NetworkBackendUtils.DoSelfStart(settings.StartScript, this, $"ComfyUI-{BackendData.ID}", $"backend-{BackendData.ID}", settings.GPU_ID, settings.ExtraArgs.Trim() + " --port {PORT}" + addedArgs, InitInternal, (p, r) => { Port = p; RunningProcess = r; }, settings.AutoRestart);
     }
+
+    /// <summary>List of known required python packages, as pairs of strings: Item1 is the folder name within python packages to look for, Item2 is the pip install command.</summary>
+    public static List<(string, string)> RequiredPythonPackages =
+    [
+        // ComfyUI added these dependencies, didn't used to have it
+        ("kornia", "kornia"),
+        ("sentencepiece", "sentencepiece"),
+        ("spandrel", "spandrel"),
+        // Other added dependencies
+        ("rembg", "rembg"),
+        ("matplotlib", "matplotlib==3.9"), // Old version due to "mesonpy" curse
+        ("opencv_python_headless", "opencv-python-headless"),
+        ("imageio_ffmpeg", "imageio-ffmpeg"),
+        ("dill", "dill"),
+        ("ultralytics", "ultralytics==8.1.47") // Old version due to "mesonpy" curse
+    ];
 
     public override async Task Shutdown()
     {
