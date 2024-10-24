@@ -17,18 +17,18 @@ public static class ModelsAPI
 {
     public static void Register()
     {
-        API.RegisterAPICall(ListModels);
-        API.RegisterAPICall(DescribeModel);
-        API.RegisterAPICall(ListLoadedModels);
-        API.RegisterAPICall(SelectModel, true);
-        API.RegisterAPICall(SelectModelWS, true);
-        API.RegisterAPICall(DeleteWildcard, true);
-        API.RegisterAPICall(TestPromptFill);
-        API.RegisterAPICall(EditWildcard, true);
-        API.RegisterAPICall(EditModelMetadata, true);
-        API.RegisterAPICall(DoModelDownloadWS, true);
-        API.RegisterAPICall(GetModelHash, true);
-        API.RegisterAPICall(ForwardMetadataRequest);
+        API.RegisterAPICall(ListModels, false, Permissions.FundamentalModelAccess);
+        API.RegisterAPICall(DescribeModel, false, Permissions.FundamentalModelAccess);
+        API.RegisterAPICall(ListLoadedModels, false, Permissions.FundamentalModelAccess);
+        API.RegisterAPICall(SelectModel, true, Permissions.LoadModelsNow);
+        API.RegisterAPICall(SelectModelWS, true, Permissions.LoadModelsNow);
+        API.RegisterAPICall(DeleteWildcard, true, Permissions.EditWildcards);
+        API.RegisterAPICall(TestPromptFill, false, Permissions.FundamentalModelAccess);
+        API.RegisterAPICall(EditWildcard, true, Permissions.EditWildcards);
+        API.RegisterAPICall(EditModelMetadata, true, Permissions.EditModelMetadata);
+        API.RegisterAPICall(DoModelDownloadWS, true, Permissions.DownloadModels);
+        API.RegisterAPICall(GetModelHash, true, Permissions.EditModelMetadata);
+        API.RegisterAPICall(ForwardMetadataRequest, false, Permissions.EditModelMetadata);
     }
 
     public static Dictionary<string, JObject> InternalExtraModels(string subtype)

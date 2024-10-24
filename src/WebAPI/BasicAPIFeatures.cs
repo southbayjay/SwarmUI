@@ -24,21 +24,21 @@ public static class BasicAPIFeatures
     /// <summary>Called by <see cref="Program"/> to register the core API calls.</summary>
     public static void Register()
     {
-        API.RegisterAPICall(GetNewSession);
-        API.RegisterAPICall(InstallConfirmWS, true);
-        API.RegisterAPICall(GetMyUserData);
-        API.RegisterAPICall(AddNewPreset, true);
-        API.RegisterAPICall(DuplicatePreset, true);
-        API.RegisterAPICall(DeletePreset, true);
-        API.RegisterAPICall(GetCurrentStatus);
-        API.RegisterAPICall(InterruptAll, true);
-        API.RegisterAPICall(GetUserSettings);
-        API.RegisterAPICall(ChangeUserSettings, true);
-        API.RegisterAPICall(SetParamEdits, true);
-        API.RegisterAPICall(GetLanguage);
-        API.RegisterAPICall(ServerDebugMessage);
-        API.RegisterAPICall(SetAPIKey, true);
-        API.RegisterAPICall(GetAPIKeyStatus);
+        API.RegisterAPICall(GetNewSession); // GetNewSession is special
+        API.RegisterAPICall(InstallConfirmWS, true, Permissions.Install);
+        API.RegisterAPICall(GetMyUserData, false, Permissions.FundamentalGenerateTabAccess);
+        API.RegisterAPICall(AddNewPreset, true, Permissions.ManagePresets);
+        API.RegisterAPICall(DuplicatePreset, true, Permissions.ManagePresets);
+        API.RegisterAPICall(DeletePreset, true, Permissions.ManagePresets);
+        API.RegisterAPICall(GetCurrentStatus, false, Permissions.FundamentalGenerateTabAccess);
+        API.RegisterAPICall(InterruptAll, true, Permissions.BasicImageGeneration);
+        API.RegisterAPICall(GetUserSettings, false, Permissions.ReadUserSettings);
+        API.RegisterAPICall(ChangeUserSettings, true, Permissions.EditUserSettings);
+        API.RegisterAPICall(SetParamEdits, true, Permissions.EditParams);
+        API.RegisterAPICall(GetLanguage, false, Permissions.FundamentalGenerateTabAccess);
+        API.RegisterAPICall(ServerDebugMessage, false, Permissions.ServerDebugMessage);
+        API.RegisterAPICall(SetAPIKey, true, Permissions.EditUserSettings);
+        API.RegisterAPICall(GetAPIKeyStatus, false, Permissions.ReadUserSettings);
         T2IAPI.Register();
         ModelsAPI.Register();
         BackendAPI.Register();
@@ -46,18 +46,14 @@ public static class BasicAPIFeatures
         UtilAPI.Register();
     }
 
-    public static string GetUserIdFor(HttpContext context)
-    {
-        if (context.Request.Headers.TryGetValue("X-SWARM-USER_ID", out StringValues user_id)) // TODO: Proper auth
-        {
-            return user_id[0];
-        }
-        return SessionHandler.LocalUserID; // TODO: disable this if non-local swarm instance
-    }
-
     /// <summary>API Route to create a new session automatically.</summary>
     public static async Task<JObject> GetNewSession(HttpContext context)
     {
+        string userId = WebServer.GetUserIdFor(context);
+        if (userId is null)
+        {
+            return new JObject() { ["error"] = "Invalid or unauthorized." };
+        }
         string source = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
         if (context.Request.Headers.TryGetValue("X-Forwarded-For", out StringValues forwardedFor) && forwardedFor.Count > 0)
         {
@@ -70,7 +66,7 @@ public static class BasicAPIFeatures
         {
             source = source[..100] + "...";
         }
-        Session session = Program.Sessions.CreateAdminSession(source, GetUserIdFor(context));
+        Session session = Program.Sessions.CreateAdminSession(source, userId);
         return new JObject()
         {
             ["session_id"] = session.ID,
@@ -78,7 +74,8 @@ public static class BasicAPIFeatures
             ["output_append_user"] = Program.ServerSettings.Paths.AppendUserNameToOutputPath,
             ["version"] = Utilities.VaryID,
             ["server_id"] = Utilities.LoopPreventionID.ToString(),
-            ["count_running"] = Program.Backends.T2IBackends.Values.Count(b => b.Backend.Status == BackendStatus.RUNNING || b.Backend.Status == BackendStatus.LOADING)
+            ["count_running"] = Program.Backends.T2IBackends.Values.Count(b => b.Backend.Status == BackendStatus.RUNNING || b.Backend.Status == BackendStatus.LOADING),
+            ["permissions"] = JArray.FromObject(session.User.GetPermissions())
         };
     }
 
@@ -295,39 +292,25 @@ public static class BasicAPIFeatures
         {
             foreach (string model in models.Split(','))
             {
-                (string file, string subfolder) = model.Trim() switch
-                {
-                    "sd15" => ("https://huggingface.co/runwayml/stable-diffusion-v1-5/resolve/main/v1-5-pruned-emaonly.safetensors", "OfficialStableDiffusion"),
-                    "sd21" => ("https://huggingface.co/stabilityai/stable-diffusion-2-1/resolve/main/v2-1_768-ema-pruned.safetensors", "OfficialStableDiffusion"),
-                    "sdxl1" => ("https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors", "OfficialStableDiffusion"),
-                    "sdxl1refiner" => ("https://huggingface.co/stabilityai/stable-diffusion-xl-refiner-1.0/resolve/main/sd_xl_refiner_1.0.safetensors", "OfficialStableDiffusion"),
-                    "fluxschnell" => ("https://huggingface.co/Comfy-Org/flux1-schnell/resolve/main/flux1-schnell-fp8.safetensors", "Flux"),
-                    "fluxdev" => ("https://huggingface.co/Comfy-Org/flux1-dev/resolve/main/flux1-dev-fp8.safetensors", "Flux"),
-                    _ => (null, null)
-                };
-                if (file is null)
+                if (!CommonModels.Known.TryGetValue(model.Trim(), out CommonModels.ModelInfo modelInfo))
                 {
                     await output($"Invalid model {model}!");
                     await socket.SendJson(new JObject() { ["error"] = $"Invalid model!" }, API.WebsocketTimeout);
                     return null;
                 }
-                await output($"Downloading model from '{file}'... please wait...");
-                string path = Utilities.CombinePathWithAbsolute(Environment.CurrentDirectory, Program.ServerSettings.Paths.ModelRoot, Program.ServerSettings.Paths.SDModelFolder.Split(';')[0]);
-                string folder = $"{path}/{subfolder}";
-                Directory.CreateDirectory(folder);
-                string filename = file.AfterLast('/');
+                await output($"Downloading model from '{modelInfo.URL}'... please wait...");
                 try
                 {
-                    await Utilities.DownloadFile(file, $"{folder}/{filename}", updateProgress);
+                    await modelInfo.DownloadNow(updateProgress);
                 }
                 catch (IOException ex)
                 {
-                    Logs.Error($"Failed to download '{file}' (IO): {ex.GetType().Name}: {ex.Message}");
+                    Logs.Error($"Failed to download '{modelInfo.URL}' (IO): {ex.GetType().Name}: {ex.Message}");
                     Logs.Debug($"Download exception: {ex.ReadableString()}");
                 }
                 catch (HttpRequestException ex)
                 {
-                    Logs.Error($"Failed to download '{file}' (HTTP): {ex.GetType().Name}: {ex.Message}");
+                    Logs.Error($"Failed to download '{modelInfo.URL}' (HTTP): {ex.GetType().Name}: {ex.Message}");
                     Logs.Debug($"Download exception: {ex.ReadableString()}");
                 }
                 stepsThusFar++;
@@ -361,6 +344,7 @@ public static class BasicAPIFeatures
             ["user_name"] = session.User.UserID,
             ["presets"] = new JArray(session.User.GetAllPresets().Select(p => p.NetData()).ToArray()),
             ["language"] = session.User.Settings.Language,
+            ["permissions"] = JArray.FromObject(session.User.GetPermissions()),
             ["autocompletions"] = string.IsNullOrWhiteSpace(settings.Source) ? null : new JArray(AutoCompleteListHelper.GetData(settings.Source, settings.EscapeParens, settings.Suffix, settings.SpacingMode))
         };
     }

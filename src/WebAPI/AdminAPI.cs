@@ -18,19 +18,19 @@ public static class AdminAPI
 {
     public static void Register()
     {
-        API.RegisterAPICall(ListServerSettings);
-        API.RegisterAPICall(ChangeServerSettings, true);
-        API.RegisterAPICall(ListLogTypes);
-        API.RegisterAPICall(ListRecentLogMessages);
-        API.RegisterAPICall(LogSubmitToPastebin, true);
-        API.RegisterAPICall(ShutdownServer, true);
-        API.RegisterAPICall(GetServerResourceInfo);
-        API.RegisterAPICall(DebugLanguageAdd, true);
-        API.RegisterAPICall(DebugGenDocs, true);
-        API.RegisterAPICall(ListConnectedUsers);
-        API.RegisterAPICall(UpdateAndRestart, true);
-        API.RegisterAPICall(InstallExtension, true);
-        API.RegisterAPICall(UpdateExtension, true);
+        API.RegisterAPICall(ListServerSettings, false, Permissions.ReadServerSettings);
+        API.RegisterAPICall(ChangeServerSettings, true, Permissions.EditServerSettings);
+        API.RegisterAPICall(ListLogTypes, false, Permissions.ViewLogs);
+        API.RegisterAPICall(ListRecentLogMessages, false, Permissions.ViewLogs);
+        API.RegisterAPICall(LogSubmitToPastebin, true, Permissions.ViewLogs);
+        API.RegisterAPICall(ShutdownServer, true, Permissions.Shutdown);
+        API.RegisterAPICall(GetServerResourceInfo, false, Permissions.ReadServerInfoPanels);
+        API.RegisterAPICall(DebugLanguageAdd, true, Permissions.AdminDebug);
+        API.RegisterAPICall(DebugGenDocs, true, Permissions.AdminDebug);
+        API.RegisterAPICall(ListConnectedUsers, false, Permissions.ReadServerInfoPanels);
+        API.RegisterAPICall(UpdateAndRestart, true, Permissions.Restart);
+        API.RegisterAPICall(InstallExtension, true, Permissions.ManageExtensions);
+        API.RegisterAPICall(UpdateExtension, true, Permissions.ManageExtensions);
     }
 
     public static JObject AutoConfigToParamData(AutoConfiguration config)
@@ -143,7 +143,7 @@ public static class AdminAPI
                 {
                     foreach (string subpath in path.Split(';').Where(p => !string.IsNullOrWhiteSpace(p)))
                     {
-                        Directory.CreateDirectory(Utilities.CombinePathWithAbsolute(Program.ServerSettings.Paths.ModelRoot, subpath));
+                        Directory.CreateDirectory(Utilities.CombinePathWithAbsolute(Program.ServerSettings.Paths.ActualModelRoot, subpath));
                     }
                 }
             }

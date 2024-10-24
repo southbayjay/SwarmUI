@@ -79,12 +79,12 @@ public abstract class ComfyUIAPIAbstractBackend : AbstractT2IBackend
         if (firstBackSlash is not null)
         {
             ModelFolderFormat = "\\";
-            Logs.Debug($"Comfy backend {BackendData.ID} using model folder format: backslash \\ due to model {firstBackSlash}");
+            Logs.Verbose($"Comfy backend {BackendData.ID} using model folder format: backslash \\ due to model {firstBackSlash}");
         }
         else
         {
             ModelFolderFormat = "/";
-            Logs.Debug($"Comfy backend {BackendData.ID} using model folder format: forward slash / as no backslash was found");
+            Logs.Verbose($"Comfy backend {BackendData.ID} using model folder format: forward slash / as no backslash was found");
         }
         try
         {
@@ -104,6 +104,10 @@ public abstract class ComfyUIAPIAbstractBackend : AbstractT2IBackend
 
     public NetworkBackendUtils.IdleMonitor Idler = new();
 
+    public bool HasEverShownInternalError = false;
+
+    public int TimesErrorIgnored = 0;
+
     public async Task InitInternal(bool ignoreWebError)
     {
         MaxUsages = 1 + OverQueue;
@@ -120,13 +124,24 @@ public abstract class ComfyUIAPIAbstractBackend : AbstractT2IBackend
             Status = BackendStatus.RUNNING;
             LoadStatusReport = null;
         }
-        catch (Exception e)
+        catch (HttpRequestException e)
         {
             if (!ignoreWebError)
             {
                 throw;
             }
             Logs.Verbose($"Comfy backend {BackendData.ID} failed to load value set, but ignoring error: {e.GetType().Name}: {e.Message}");
+            TimesErrorIgnored++;
+            if (!HasEverShownInternalError && TimesErrorIgnored == 15)
+            {
+                HasEverShownInternalError = true;
+                Logs.Debug($"Comfy backend {BackendData.ID} has failed to load value set repeatedly. Ignoring errors of {e.GetType().Name}: {e.Message}");
+            }
+            if (!HasEverShownInternalError && TimesErrorIgnored > 40)
+            {
+                HasEverShownInternalError = true;
+                Logs.Warning($"Comfy backend {BackendData.ID} has failed to load value set repeatedly. Is it stuck loading very slowly, or has it internally failed? Ignoring errors of {e.GetType().Name}: {e.Message}");
+            }
         }
         Idler.Stop();
         Program.GlobalProgramCancel.ThrowIfCancellationRequested();

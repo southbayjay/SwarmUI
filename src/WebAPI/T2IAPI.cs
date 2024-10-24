@@ -26,15 +26,15 @@ public static class T2IAPI
     public static void Register()
     {
         // TODO: Some of these shouldn't be here?
-        API.RegisterAPICall(GenerateText2Image, true);
-        API.RegisterAPICall(GenerateText2ImageWS, true);
-        API.RegisterAPICall(AddImageToHistory);
-        API.RegisterAPICall(ListImages);
-        API.RegisterAPICall(ToggleImageStarred, true);
-        API.RegisterAPICall(OpenImageFolder, true);
-        API.RegisterAPICall(DeleteImage, true);
-        API.RegisterAPICall(ListT2IParams);
-        API.RegisterAPICall(TriggerRefresh);
+        API.RegisterAPICall(GenerateText2Image, true, Permissions.BasicImageGeneration);
+        API.RegisterAPICall(GenerateText2ImageWS, true, Permissions.BasicImageGeneration);
+        API.RegisterAPICall(AddImageToHistory, true, Permissions.BasicImageGeneration);
+        API.RegisterAPICall(ListImages, false, Permissions.ViewImageHistory);
+        API.RegisterAPICall(ToggleImageStarred, true, Permissions.UserStarImages);
+        API.RegisterAPICall(OpenImageFolder, true, Permissions.LocalImageFolder);
+        API.RegisterAPICall(DeleteImage, true, Permissions.UserDeleteImage);
+        API.RegisterAPICall(ListT2IParams, false, Permissions.FundamentalGenerateTabAccess);
+        API.RegisterAPICall(TriggerRefresh, true, Permissions.FundamentalGenerateTabAccess); // Intentionally weird perm here: internal check for readonly vs true refresh
     }
 
     [API.APIDescription("Generate images from text prompts, with WebSocket updates. This is the most important route inside of Swarm.",
@@ -661,7 +661,7 @@ public static class T2IAPI
 
     public static SemaphoreSlim RefreshSemaphore = new(1, 1);
 
-    [API.APIDescription("Trigger a refresh of the server's data, returning parameter data.",
+    [API.APIDescription("Trigger a refresh of the server's data, returning parameter data. Requires permission 'control_model_refresh' to actually take effect, otherwise just pulls latest data.",
         """
             // see `ListT2IParams` for details
             "list": [...],
@@ -674,6 +674,11 @@ public static class T2IAPI
     {
         Logs.Verbose($"User {session.User.UserID} triggered a {(strong ? "strong" : "weak")} data refresh");
         bool botherToRun = strong && RefreshSemaphore.CurrentCount > 0; // no need to run twice at once
+        if (!session.User.HasPermission(Permissions.ControlModelRefresh))
+        {
+            Logs.Debug($"User {session.User.UserID} requested refresh, but will not perform actual refresh as they lack permission.");
+            botherToRun = false;
+        }
         try
         {
             await RefreshSemaphore.WaitAsync(Program.GlobalProgramCancel);
@@ -751,7 +756,7 @@ public static class T2IAPI
         }
         return new JObject()
         {
-            ["list"] = new JArray(T2IParamTypes.Types.Values.Select(v => v.ToNet(session)).ToList()),
+            ["list"] = new JArray(T2IParamTypes.Types.Values.Where(p => p.Permission is null || session.User.HasPermission(p.Permission)).Select(v => v.ToNet(session)).ToList()),
             ["models"] = modelData,
             ["wildcards"] = new JArray(WildcardsHelper.ListFiles),
             ["param_edits"] = string.IsNullOrWhiteSpace(session.User.Data.RawParamEdits) ? null : JObject.Parse(session.User.Data.RawParamEdits)

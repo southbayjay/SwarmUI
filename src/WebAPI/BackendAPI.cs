@@ -13,14 +13,14 @@ public class BackendAPI
 {
     public static void Register()
     {
-        API.RegisterAPICall(ListBackendTypes);
-        API.RegisterAPICall(ListBackends);
-        API.RegisterAPICall(DeleteBackend, true);
-        API.RegisterAPICall(ToggleBackend, true);
-        API.RegisterAPICall(EditBackend, true);
-        API.RegisterAPICall(AddNewBackend, true);
-        API.RegisterAPICall(RestartBackends, true);
-        API.RegisterAPICall(FreeBackendMemory, true);
+        API.RegisterAPICall(ListBackendTypes, false, Permissions.ViewBackendsList);
+        API.RegisterAPICall(ListBackends, false, Permissions.ViewBackendsList);
+        API.RegisterAPICall(DeleteBackend, true, Permissions.AddRemoveBackends);
+        API.RegisterAPICall(ToggleBackend, true, Permissions.ToggleBackends);
+        API.RegisterAPICall(EditBackend, true, Permissions.EditBackends);
+        API.RegisterAPICall(AddNewBackend, true, Permissions.AddRemoveBackends);
+        API.RegisterAPICall(RestartBackends, true, Permissions.RestartBackends);
+        API.RegisterAPICall(FreeBackendMemory, true, Permissions.ControlMemClean);
     }
 
     [API.APIDescription("Returns of a list of all available backend types.",

@@ -139,7 +139,11 @@ public class WorkflowGenerator
     public bool IsSD3()
     {
         string clazz = CurrentCompatClass();
-        return clazz is not null && clazz == "stable-diffusion-v3-medium";
+        if (clazz is null)
+        {
+            return false;
+        }
+        return clazz.StartsWith("stable-diffusion-v3");
     }
 
     /// <summary>Returns true if the current model is Black Forest Labs' Flux.1.</summary>
@@ -177,8 +181,40 @@ public class WorkflowGenerator
         return CreateNode(classType, (_, n) => n["inputs"] = input, id);
     }
 
+    public void DownloadCommonModel(string id)
+    {
+        CommonModels.ModelInfo info = CommonModels.Known[id];
+        string path = $"{Program.T2IModelSets[info.FolderType].FolderPaths[0]}/{info.FileName}";
+        if (File.Exists(path))
+        {
+            return;
+        }
+        Logs.Info($"Downloading {info.DisplayName} to {path}...");
+        double nextPerc = 0.05;
+        try
+        {
+            info.DownloadNow((bytes, total, perSec) =>
+            {
+                double perc = bytes / (double)total;
+                if (perc >= nextPerc)
+                {
+                    Logs.Info($"{info.DisplayName} download at {perc * 100:0.0}%...");
+                    // TODO: Send a signal back so a progress bar can be displayed on a UI
+                    nextPerc = Math.Round(perc / 0.05) * 0.05 + 0.05;
+                }
+            }).Wait();
+        }
+        catch (Exception ex)
+        {
+            Logs.Error($"Failed to download {info.DisplayName} from {info.URL}: {ex.Message}");
+            File.Delete(path);
+            throw new SwarmReadableErrorException("Required model download failed.");
+        }
+        Logs.Info($"Downloading complete, continuing.");
+    }
+
     /// <summary>Helper to download a core model file required by the workflow.</summary>
-    public void DownloadModel(string name, string filePath, string url)
+    public void DownloadModel(string name, string filePath, string url, string hash)
     {
         if (File.Exists(filePath))
         {
@@ -190,7 +226,6 @@ public class WorkflowGenerator
             {
                 return;
             }
-            Directory.CreateDirectory(Path.GetDirectoryName(filePath));
             Logs.Info($"Downloading {name} to {filePath}...");
             double nextPerc = 0.05;
             try
@@ -204,7 +239,7 @@ public class WorkflowGenerator
                         // TODO: Send a signal back so a progress bar can be displayed on a UI
                         nextPerc = Math.Round(perc / 0.05) * 0.05 + 0.05;
                     }
-                }).Wait();
+                }, verifyHash: hash).Wait();
             }
             catch (Exception ex)
             {
@@ -456,14 +491,14 @@ public class WorkflowGenerator
             LoadingVAE = parts[4].Length == 0 ? null : [parts[4], int.Parse(parts[5])];
             return (model, LoadingModel, LoadingClip, LoadingVAE);
         }
-        void requireClipModel(string name, string url)
+        void requireClipModel(string name, string url, string hash)
         {
             if (ClipModelsValid.Contains(name))
             {
                 return;
             }
             string filePath = Utilities.CombinePathWithAbsolute(Program.ServerSettings.Paths.ActualModelRoot, Program.ServerSettings.Paths.SDClipFolder, name);
-            DownloadModel(name, filePath, url);
+            DownloadModel(name, filePath, url, hash);
             ClipModelsValid.Add(name);
         }
         string getT5XXLModel()
@@ -472,7 +507,7 @@ public class WorkflowGenerator
             {
                 return model;
             }
-            requireClipModel("t5xxl_enconly.safetensors", "https://huggingface.co/mcmonkey/google_t5-v1_1-xxl_encoderonly/resolve/main/t5xxl_fp8_e4m3fn.safetensors");
+            requireClipModel("t5xxl_enconly.safetensors", "https://huggingface.co/mcmonkey/google_t5-v1_1-xxl_encoderonly/resolve/main/t5xxl_fp8_e4m3fn.safetensors", "7d330da4816157540d6bb7838bf63a0f02f573fc48ca4d8de34bb0cbfd514f09");
             return "t5xxl_enconly.safetensors";
         }
         string getClipLModel()
@@ -485,7 +520,7 @@ public class WorkflowGenerator
             {
                 return "clip_l_sdxl_base.safetensors";
             }
-            requireClipModel("clip_l.safetensors", "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/text_encoder/model.fp16.safetensors");
+            requireClipModel("clip_l.safetensors", "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/text_encoder/model.fp16.safetensors", "660c6f5b1abae9dc498ac2d21e1347d2abdb0cf6c0c0c8576cd796491d9a6cdd");
             return "clip_l.safetensors";
         }
         string getClipGModel()
@@ -498,7 +533,7 @@ public class WorkflowGenerator
             {
                 return "clip_g_sdxl_base.safetensors";
             }
-            requireClipModel("clip_g.safetensors", "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/text_encoder_2/model.fp16.safetensors");
+            requireClipModel("clip_g.safetensors", "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/text_encoder_2/model.fp16.safetensors", "ec310df2af79c318e24d20511b601a591ca8cd4f1fce1d8dff822a356bcdb1f4");
             return "clip_g.safetensors";
         }
         IsDifferentialDiffusion = false;
@@ -559,11 +594,7 @@ public class WorkflowGenerator
             {
                 throw new SwarmUserErrorException("No default SDXL VAE found, please download an SDXL VAE and set it as default in User Settings");
             }
-            string vaeLoader = CreateNode("VAELoader", new JObject()
-            {
-                ["vae_name"] = xlVae
-            });
-            LoadingVAE = [vaeLoader, 0];
+            LoadingVAE = CreateVAELoader(xlVae);
         }
         else if (model.OriginatingFolderPath.Replace('\\', '/').EndsWith("/unet") || model.OriginatingFolderPath.Replace('\\', '/').EndsWith("/diffusion_models")) // Hacky but it works for now
         {
@@ -682,8 +713,29 @@ public class WorkflowGenerator
                     LoadingClip = [tripleClipLoader, 0];
                 }
             }
+            if (LoadingVAE is null)
+            {
+                string sd3Vae = UserInput.SourceSession?.User?.Settings?.VAEs?.DefaultFluxVAE;
+                string nodeId = null;
+                if (!NoVAEOverride && UserInput.TryGet(T2IParamTypes.VAE, out T2IModel vaeModel))
+                {
+                    sd3Vae = vaeModel.Name;
+                    nodeId = "11";
+                }
+                if (string.IsNullOrWhiteSpace(sd3Vae) || sd3Vae == "None")
+                {
+                    sd3Vae = Program.T2IModelSets["VAE"].Models.Values.FirstOrDefault(m => m.ModelClass?.CompatClass == "stable-diffusion-v3")?.Name;
+                }
+                if (string.IsNullOrWhiteSpace(sd3Vae))
+                {
+                    CommonModels.Known["sd35-vae"].DownloadNow().Wait();
+                    Program.RefreshAllModelSets();
+                    sd3Vae = CommonModels.Known["sd35-vae"].FileName;
+                }
+                LoadingVAE = CreateVAELoader(sd3Vae, nodeId);
+            }
         }
-        else if (IsFlux() && (LoadingClip is null || LoadingVAE is null))
+        else if (IsFlux() && (LoadingClip is null || LoadingVAE is null || UserInput.Get(ComfyUIBackendExtension.T5XXLModel) is not null || UserInput.Get(ComfyUIBackendExtension.ClipLModel) is not null))
         {
             string loaderType = "DualCLIPLoader";
             if (getT5XXLModel().EndsWith(".gguf"))
@@ -698,19 +750,23 @@ public class WorkflowGenerator
             });
             LoadingClip = [dualClipLoader, 0];
             string fluxVae = UserInput.SourceSession?.User?.Settings?.VAEs?.DefaultFluxVAE;
+            string nodeId = null;
+            if (!NoVAEOverride && UserInput.TryGet(T2IParamTypes.VAE, out T2IModel vaeModel))
+            {
+                fluxVae = vaeModel.Name;
+                nodeId = "11";
+            }
             if (string.IsNullOrWhiteSpace(fluxVae) || fluxVae == "None")
             {
                 fluxVae = Program.T2IModelSets["VAE"].Models.Values.FirstOrDefault(m => m.ModelClass?.CompatClass == "flux-1")?.Name;
             }
             if (string.IsNullOrWhiteSpace(fluxVae))
             {
-                throw new SwarmUserErrorException("No default Flux VAE found, please download a Flux VAE and set it as default in User Settings");
+                CommonModels.Known["flux-ae"].DownloadNow().Wait();
+                Program.RefreshAllModelSets();
+                fluxVae = CommonModels.Known["flux-ae"].FileName;
             }
-            string vaeLoader = CreateNode("VAELoader", new JObject()
-            {
-                ["vae_name"] = fluxVae
-            });
-            LoadingVAE = [vaeLoader, 0];
+            LoadingVAE = CreateVAELoader(fluxVae, nodeId);
         }
         else if (CurrentCompatClass() == "auraflow-v1")
         {
@@ -753,6 +809,22 @@ public class WorkflowGenerator
         }
         NodeHelpers[helper] = $"{LoadingModel[0]}:{LoadingModel[1]}" + (LoadingClip is null ? "::" : $":{LoadingClip[0]}:{LoadingClip[1]}") + (LoadingVAE is null ? "::" : $":{LoadingVAE[0]}:{LoadingVAE[1]}");
         return (model, LoadingModel, LoadingClip, LoadingVAE);
+    }
+
+    /// <summary>Creates a VAELoader node and returns its node ID. Avoids duplication.</summary>
+    public JArray CreateVAELoader(string vae, string id = null)
+    {
+        string vaeFixed = vae.Replace('\\', '/').Replace("/", ModelFolderFormat ?? $"{Path.DirectorySeparatorChar}");
+        if (id is null && NodeHelpers.TryGetValue($"vaeloader-{vaeFixed}", out string helper))
+        {
+            return [helper, 0];
+        }
+        string vaeLoader = CreateNode("VAELoader", new JObject()
+        {
+            ["vae_name"] = vaeFixed
+        }, id);
+        NodeHelpers[$"vaeloader-{vae}"] = vaeLoader;
+        return [vaeLoader, 0];
     }
 
     /// <summary>Creates a VAEDecode node and returns its node ID.</summary>
