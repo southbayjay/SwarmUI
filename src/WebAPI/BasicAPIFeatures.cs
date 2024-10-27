@@ -86,9 +86,10 @@ public static class BasicAPIFeatures
             await socket.SendJson(new JObject() { ["error"] = $"Server is already installed!" }, API.WebsocketTimeout);
             return null;
         }
-        if (!session.User.Restrictions.Admin)
+        if (Directory.Exists("dlbackend/comfy"))
         {
-            await socket.SendJson(new JObject() { ["error"] = $"You are not an admin of this server, install request refused." }, API.WebsocketTimeout);
+            Logs.Error("It looks like a previous install already exists here. If you are intentionally rerunning the installer, please delete 'Data' and 'dlbackend' folders from the Swarm folder.");
+            await socket.SendJson(new JObject() { ["error"] = $"It looks like a previous install already exists here. If you are intentionally rerunning the installer, please delete 'Data' and 'dlbackend' folders from the Swarm folder." }, API.WebsocketTimeout);
             return null;
         }
         async Task output(string str)
@@ -288,6 +289,12 @@ public static class BasicAPIFeatures
         }
         stepsThusFar++;
         updateProgress(0, 0, 0);
+        Program.ServerSettings.IsInstalled = true;
+        if (Program.ServerSettings.LaunchMode == "webinstall")
+        {
+            Program.ServerSettings.LaunchMode = "web";
+        }
+        Program.SaveSettingsFile();
         if (models != "none")
         {
             foreach (string model in models.Split(','))
@@ -302,6 +309,10 @@ public static class BasicAPIFeatures
                 try
                 {
                     await modelInfo.DownloadNow(updateProgress);
+                }
+                catch (SwarmReadableErrorException ex)
+                {
+                    Logs.Error($"Failed to download '{modelInfo.URL}': {ex.Message}");
                 }
                 catch (IOException ex)
                 {
@@ -321,12 +332,6 @@ public static class BasicAPIFeatures
         }
         stepsThusFar++;
         updateProgress(0, 0, 0);
-        Program.ServerSettings.IsInstalled = true;
-        if (Program.ServerSettings.LaunchMode == "webinstall")
-        {
-            Program.ServerSettings.LaunchMode = "web";
-        }
-        Program.SaveSettingsFile();
         await Program.Backends.ReloadAllBackends();
         stepsThusFar++;
         updateProgress(0, 0, 0);
